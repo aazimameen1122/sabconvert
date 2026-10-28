@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SabConvert — every tool you need to work with files, in one place</title>
 <meta name="description" content="Free all-format file converter that runs entirely in your browser. Images, PDF, tables, documents, subtitles, archives, video frames — no upload, no server, no account.">
-<link rel="stylesheet" href="style.css?v=2">
+<link rel="stylesheet" href="style.css?v=3">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%23e5322d'/><text y='0.72em' x='0.08em' font-size='72' fill='white'>⇄</text></svg>">
 </head>
 <body>
@@ -93,11 +93,36 @@
   </section>
 
   <section class="wide" id="formmode">
-    <div class="sec-head">
-      <h2>Form / Exam Mode</h2>
-      <p>Portals reject a photo that is 1 KB too big — and one that is too small. Pick the form, drop the file: it is cropped to the exact box (never stretched) and fitted <strong>inside</strong> the portal's size window, with a check line that proves it. Certificate presets turn every scan into its own PDF under the cap.</p>
+    <div class="sec-head form-head">
+      <span class="tool-icon form-tile" aria-hidden="true">KB</span>
+      <div class="form-head-main">
+        <h2>Form / Exam Mode <span class="new-pill">New!</span></h2>
+        <p>Portals reject a photo that is 1 KB too big — and one that is too small. Pick the form, drop the file: it is cropped to the exact box (never stretched) and fitted <strong>inside</strong> the portal's size window, with a check line that proves it. Certificate presets turn every scan into its own PDF under the cap.</p>
+      </div>
     </div>
     <div class="form-panel">
+      <div class="preset-groups" id="presetChips">
+        <div class="preset-group">
+          <span class="preset-group-label">Photo &amp; Signature</span>
+          <div class="preset-chips">
+            <button type="button" class="pchip" data-preset="ssc-photo">SSC Photo</button>
+            <button type="button" class="pchip" data-preset="ssc-sign">SSC Signature</button>
+            <button type="button" class="pchip" data-preset="ibps-photo">IBPS Photo</button>
+            <button type="button" class="pchip" data-preset="ibps-sign">IBPS Signature</button>
+            <button type="button" class="pchip" data-preset="neet-photo">NEET Photo</button>
+            <button type="button" class="pchip" data-preset="neet-sign">NEET Signature</button>
+          </div>
+        </div>
+        <div class="preset-group">
+          <span class="preset-group-label">Certificates</span>
+          <div class="preset-chips">
+            <button type="button" class="pchip" data-preset="jkssb-cert">JKSSB Certificate</button>
+            <button type="button" class="pchip" data-preset="nsp-doc">NSP Document</button>
+            <button type="button" class="pchip" data-preset="custom">Custom window…</button>
+          </div>
+        </div>
+      </div>
+      <div class="spec-card" id="formSpec" aria-live="polite"></div>
       <div class="form-controls">
         <label class="form-preset-label">I am filling
           <select id="formPreset"></select>
@@ -112,8 +137,14 @@
         </span>
       </div>
       <p class="form-hint" id="formHint"></p>
+      <div class="form-steps" aria-label="How form mode works">
+        <div class="step"><span class="step-n">1</span><p><strong>Pick your form</strong>SSC, IBPS, NEET, JKSSB, NSP — or your own window.</p></div>
+        <div class="step"><span class="step-n">2</span><p><strong>Drop the photo, signature or scan</strong>It is cropped to the exact box, never stretched.</p></div>
+        <div class="step"><span class="step-n">3</span><p><strong>Check the green line, then download</strong>Green means the file sits inside the portal's window.</p></div>
+      </div>
       <div id="formDrop" tabindex="0" role="button" aria-label="Add files for form mode">
-        <p class="dz-big">Drag &amp; drop files here, or click to pick files</p>
+        <span class="btn-primary dz-browse">Select files</span>
+        <p class="dz-big">or drop files here</p>
         <p class="dz-small">Photos &amp; signatures for image presets · scans or PDFs for certificate presets</p>
         <input type="file" id="formFileInput" multiple hidden>
       </div>
@@ -174,9 +205,9 @@
     addEventListener('online', paint); addEventListener('offline', paint); paint();
   })();
 </script>
-<script src="jszip.min.js?v=2"></script>
-<script src="routes.js?v=2"></script>
-<script src="converters.js?v=2"></script>
-<script src="app.js?v=2"></script>
+<script src="jszip.min.js?v=3"></script>
+<script src="routes.js?v=3"></script>
+<script src="converters.js?v=3"></script>
+<script src="app.js?v=3"></script>
 </body>
 </html>

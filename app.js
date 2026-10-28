@@ -544,7 +544,54 @@
     if (s.type === 'doc') formHint.textContent = 'Every file becomes its OWN PDF of at most ' + s.maxKB + ' KB — add each certificate separately, exactly like the portal asks.';
     else if (s.width > 0) formHint.textContent = 'JPG · must land between ' + s.minKB + '–' + s.maxKB + ' KB · exactly ' + s.width + ' × ' + s.height + ' px. The photo is cropped to the box, never stretched — drag the preview to move the crop.';
     else formHint.textContent = 'JPG · must land between ' + s.minKB + '–' + s.maxKB + ' KB · the photo keeps its own shape.';
+    paintFormSpec();
   }
+
+  // Spec card: a visual readout of the same spec currentFormSpec() returns
+  // (dims / output / KB window bar). Presentation only — no preset data here.
+  const formSpecEl = document.getElementById('formSpec');
+  function paintFormSpec() {
+    if (!formSpecEl) return;
+    const s = currentFormSpec();
+    if (s.id === 'custom') {
+      formSpecEl.innerHTML = '<p class="spec-custom">Custom window — set your numbers below</p>';
+      return;
+    }
+    const axis = Math.max(s.maxKB * 2, 100);
+    const left = (s.minKB / axis * 100).toFixed(1), width = ((s.maxKB - s.minKB) / axis * 100).toFixed(1);
+    const bar = '<div class="spec-bar" aria-hidden="true"><div class="spec-zone" style="left:' + left + '%;width:' + width + '%"></div></div>' +
+      '<div class="spec-axis" aria-hidden="true"><span>0</span><span>' + axis + ' KB</span></div>';
+    if (s.type === 'doc') {
+      formSpecEl.innerHTML =
+        '<div class="spec-main"><span class="spec-big">≤ ' + s.maxKB + ' <span class="spec-unit">KB</span></span>' +
+        '<span class="spec-note">Each file → its own <strong>PDF</strong></span></div>' + bar +
+        '<p class="spec-label">0–' + s.maxKB + ' KB — every file stays under the cap</p>';
+    } else {
+      const dims = s.width > 0
+        ? s.width + ' × ' + s.height + ' <span class="spec-unit">px</span>'
+        : 'Any size — keeps its shape';
+      formSpecEl.innerHTML =
+        '<div class="spec-main"><span class="spec-big">' + dims + '</span>' +
+        '<span class="spec-note">Output <strong>JPG</strong></span></div>' + bar +
+        '<p class="spec-label">' + s.minKB + '–' + s.maxKB + ' KB — file must land inside</p>';
+    }
+  }
+
+  // Preset chips: a visual shortcut for the same #formPreset select. A chip
+  // click sets the select and fires its normal 'change' (hint + rerun run
+  // untouched); the active chip always mirrors the select's value.
+  function syncPresetChips() {
+    document.querySelectorAll('#presetChips .pchip').forEach(c =>
+      c.classList.toggle('active', c.dataset.preset === formPresetSel.value));
+  }
+  document.querySelectorAll('#presetChips .pchip').forEach(ch => ch.addEventListener('click', () => {
+    if (formPresetSel.value !== ch.dataset.preset) {
+      formPresetSel.value = ch.dataset.preset;
+      formPresetSel.dispatchEvent(new Event('change'));
+    }
+    syncPresetChips();
+  }));
+  formPresetSel.addEventListener('change', syncPresetChips);
   formPresetSel.addEventListener('change', () => { paintFormHint(); rerunFormItems(); });
   formCustomEl.addEventListener('change', () => { paintFormHint(); rerunFormItems(); });
   formDrop.addEventListener('click', () => formInput.click());
@@ -675,15 +722,18 @@
     const p = document.createElement('p');
     p.className = 'form-check bad'; p.textContent = '✗ ' + it.error;
     res.appendChild(p);
+    card.classList.remove('has-ok');
   }
   function paintFormResults(it, card) {
     const statusEl = card.querySelector('.form-status');
     statusEl.textContent = ''; statusEl.className = 'form-status';
     const res = card.querySelector('.results');
     res.innerHTML = '';
+    let anyOk = false;
     for (const r of it.results) {
       res.appendChild(dlRow(r, sizeDelta(it, r.blob.size)));
       const chk = formCheck(it, r);
+      if (chk.ok) anyOk = true;
       const p = document.createElement('p');
       p.className = 'form-check ' + (chk.ok ? 'ok' : 'bad');
       p.textContent = chk.text;
@@ -695,8 +745,10 @@
         res.appendChild(warn);
       }
     }
+    card.classList.toggle('has-ok', anyOk);
   }
 
   paintFormHint();
+  syncPresetChips();
   render();
 })();

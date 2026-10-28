@@ -16,6 +16,16 @@ conversion still happens entirely in the visitor's browser. See
 copied (Drive/Dropbox pickers, server processing, Graphik font), and
 the harness evidence.
 
+**Form / Exam Mode (v2.1):** the section got a featured header (green
+KB tile + red "New!" pill), grouped preset chips (Photo & Signature /
+Certificates / Custom) that drive the same preset dropdown, a live
+spec card — exact pixels, JPG output, and a KB-window bar showing the
+allowed min–max zone — a 1-2-3 steps strip, and a dropzone with the
+same big red "Select files" pill as the main stage. A fitted file that
+lands inside its window gives its card a green left border next to the
+green check line. Presentation and guidance only: the form engine is
+untouched. See `RESULTS.md` ("v2.1").
+
 ## Run locally
 
 Any static server, no build step:
