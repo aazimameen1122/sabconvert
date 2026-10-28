@@ -58,16 +58,19 @@
       const card = document.createElement('article');
       card.className = 'card';
       const kindLabel = it.kind ? R.KINDS[it.kind].label : 'Unknown type';
+      const extTag = (R.extOf(it.file.name) || 'file').toUpperCase();
       card.innerHTML =
-        '<div class="card-head"><strong class="fname"></strong><span class="meta"></span>' +
+        '<div class="card-head"><span class="icon-tile kind-' + (it.kind || 'unknown') + '" aria-hidden="true">' + extTag + '</span>' +
+        '<span class="fname-wrap"><strong class="fname"></strong><span class="meta"></span></span>' +
         '<button class="x" title="Remove">✕</button></div>' +
         (it.kind ? '' : '<p class="warn">Format not in the converter list — you can still Base64-encode or ZIP it.</p>') +
-        '<div class="row"><label>Convert to <select class="target">' +
+        '<div class="row"><label class="to-label">To: <select class="target">' +
         outs.map(o => '<option value="' + o.to + '"' + (o.to === it.target ? ' selected' : '') + '>' + o.label + '</option>').join('') +
         '</select></label>' +
         '<button class="primary convert">Convert</button>' +
         '<span class="status"></span></div>' +
         optionControls(it) +
+        '<div class="progress" hidden><div class="bar"></div></div>' +
         '<div class="results"></div>';
       card.querySelector('.fname').textContent = it.file.name;
       card.querySelector('.meta').textContent = kindLabel + ' · ' + fmtSize(it.file.size);
@@ -105,12 +108,18 @@
 
   async function convertItem(it, statusEl, resultsEl) {
     statusEl.textContent = 'converting…'; statusEl.className = 'status';
+    const card = statusEl.closest('.card');
+    const prog = card && card.querySelector('.progress');
+    const bar = prog && prog.querySelector('.bar');
+    if (prog && bar) { prog.hidden = false; bar.className = 'bar run'; }
     try {
       it.results = await window.SabConvert.convert(it.file, it.target, it.options);
       it.status = 'done'; it.error = '';
+      if (bar) bar.className = 'bar full';
       paintResults(it, resultsEl, statusEl);
     } catch (e) {
       it.status = 'error'; it.error = e.message || String(e); it.results = [];
+      if (prog) prog.hidden = true;
       statusEl.textContent = '✗ ' + it.error; statusEl.className = 'status err';
     }
     renderSummaryOnly();
