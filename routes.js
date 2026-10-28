@@ -32,6 +32,7 @@
       { to: 'txt', label: 'TXT (text)', conv: 'pdfToText' },
       { to: 'split', label: 'Split into pages', conv: 'pdfSplit' },
       { to: 'extract', label: 'Extract pages → PDF', conv: 'pdfExtract' },
+      { to: 'compress', label: 'Compress PDF (smaller)', conv: 'pdfCompress' },
     ] },
     csv:     { label: 'CSV table', exts: ['csv'], outputs: tableOut },
     tsv:     { label: 'TSV table', exts: ['tsv'], outputs: tableOut },

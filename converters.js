@@ -31,11 +31,18 @@
     xml: 'application/xml', zip: 'application/zip' };
 
   /* ---------------- images (Canvas) ---------------- */
-  async function imageCanvas(file, o) {
-    const bmp = await createImageBitmap(file);
+  // Draws a decoded bitmap to a canvas honouring the option set:
+  // width/height (exact px; one side only keeps aspect), scale factor,
+  // maxDim cap, rotate, grayscale. Old option sets behave exactly as before.
+  function drawImageCanvas(bmp, o, scale) {
     const rot = parseInt(o.rotate || '0', 10);
     const swap = rot === 90 || rot === 270;
     let w = bmp.width, h = bmp.height;
+    const tw = parseInt(o.width || '0', 10), th = parseInt(o.height || '0', 10);
+    if (tw > 0 && th > 0) { w = tw; h = th; }
+    else if (tw > 0) { h = Math.max(1, Math.round(h * tw / w)); w = tw; }
+    else if (th > 0) { w = Math.max(1, Math.round(w * th / h)); h = th; }
+    if (scale && scale > 0 && scale !== 1) { w = Math.max(1, Math.round(w * scale)); h = Math.max(1, Math.round(h * scale)); }
     const maxDim = parseInt(o.maxDim || '0', 10);
     if (maxDim > 0) { const m = Math.max(w, h); if (m > maxDim) { const s = maxDim / m; w = Math.round(w * s); h = Math.round(h * s); } }
     const cw = swap ? h : w, ch = swap ? w : h;
@@ -44,8 +51,19 @@
     if (o.grayscale) ctx.filter = 'grayscale(1)';
     ctx.translate(cw / 2, ch / 2); ctx.rotate(rot * Math.PI / 180);
     ctx.drawImage(bmp, -w / 2, -h / 2, w, h);
+    return cv;
+  }
+  async function imageCanvas(file, o) {
+    const bmp = await createImageBitmap(file);
+    const cv = drawImageCanvas(bmp, o, 1);
     bmp.close && bmp.close();
     return cv;
+  }
+  async function imageInfo(file) {
+    const bmp = await createImageBitmap(file);
+    const d = { width: bmp.width, height: bmp.height };
+    bmp.close && bmp.close();
+    return d;
   }
   function canvasBlob(cv, type, q) {
     return new Promise((res, rej) => cv.toBlob(b => b ? res(b) : rej(new Error('canvas encode failed: ' + type)), type, q));
@@ -78,7 +96,49 @@
       g.render();
     });
   }
+  // Encode an image so its output is <= targetBytes. JPG/WebP: binary-search
+  // quality at the largest size first, then step the scale down. PNG is
+  // lossless, so only the scale can shrink it (reported honestly as such).
+  // Returns { blob, info } where info.hit says whether the target was met.
+  async function fitImage(file, target, o, targetBytes) {
+    const bmp = await createImageBitmap(file);
+    try {
+      const mime = MIME[target];
+      if (target !== 'png') { // fast path: the normal encode may already fit
+        const q0 = o.quality ? Math.min(1, Math.max(0.1, parseFloat(o.quality))) : 0.92;
+        const b0 = await canvasBlob(drawImageCanvas(bmp, o, 1), mime, q0);
+        if (b0.size <= targetBytes) return { blob: b0, info: { targetBytes, achievedBytes: b0.size, hit: true, quality: q0, scale: 1, mode: 'quality' } };
+      }
+      const scales = [1, 0.85, 0.7, 0.55, 0.45, 0.35, 0.27, 0.2, 0.15];
+      let best = null;
+      const consider = (rec) => { if (!best || rec.blob.size < best.blob.size) best = rec; };
+      for (const s of scales) {
+        const cv = drawImageCanvas(bmp, o, s);
+        if (target === 'png') {
+          const blob = await canvasBlob(cv, 'image/png');
+          consider({ blob, scale: s, quality: null });
+          if (blob.size <= targetBytes) { best = { blob, scale: s, quality: null, hit: true }; break; }
+        } else {
+          let lo = 0.05, hi = 0.95, found = null;
+          for (let i = 0; i < 7; i++) {
+            const q = (lo + hi) / 2;
+            const blob = await canvasBlob(cv, mime, q);
+            consider({ blob, scale: s, quality: q });
+            if (blob.size <= targetBytes) { found = { blob, scale: s, quality: q, hit: true }; lo = q; } else hi = q;
+          }
+          if (found) { best = found; break; }
+        }
+      }
+      return { blob: best.blob, info: { targetBytes, achievedBytes: best.blob.size, hit: !!best.hit, quality: best.quality, scale: best.scale, mode: target === 'png' ? 'scale' : 'quality+scale' } };
+    } finally { bmp.close && bmp.close(); }
+  }
   async function convImage(file, target, o) {
+    const targetKB = parseFloat(o.targetKB || '0');
+    if (targetKB > 0 && (target === 'jpg' || target === 'webp' || target === 'png')) {
+      const fit = await fitImage(file, target, o, Math.round(targetKB * 1024));
+      const r = out(file, '.' + target, fit.blob); r.fit = fit.info;
+      return [r];
+    }
     const cv = await imageCanvas(file, o);
     const q = o.quality ? Math.min(1, Math.max(0.1, parseFloat(o.quality))) : 0.92;
     if (target === 'jpg') return [out(file, '.jpg', await canvasBlob(cv, 'image/jpeg', q))];
@@ -105,6 +165,21 @@
     const pdfjsLib = await ensurePdfJs();
     const data = new Uint8Array(await file.arrayBuffer());
     return pdfjsLib.getDocument({ data }).promise;
+  }
+  // First-page thumbnail (JPEG blob) + page count, for card previews.
+  async function pdfThumb(file, maxDim) {
+    const pdf = await pdfJsDoc(file);
+    const page = await pdf.getPage(1);
+    const base = page.getViewport({ scale: 1 });
+    const cap = maxDim || 360;
+    const scale = Math.min(1.5, cap / Math.max(base.width, base.height));
+    const vp = page.getViewport({ scale });
+    const cv = document.createElement('canvas'); cv.width = Math.max(1, Math.round(vp.width)); cv.height = Math.max(1, Math.round(vp.height));
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, cv.width, cv.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    const blob = await canvasBlob(cv, 'image/jpeg', 0.82);
+    return { blob, pages: pdf.numPages, width: base.width, height: base.height };
   }
   async function convPdfToImages(file, target) {
     const pdf = await pdfJsDoc(file);
@@ -177,6 +252,49 @@
       copied.forEach(pg => doc.addPage(pg));
     }
     return [{ name: 'merged.pdf', blob: new Blob([await doc.save()], { type: 'application/pdf' }) }];
+  }
+  // Compress a PDF by re-rendering every page to a JPEG and rebuilding the
+  // document with pdf-lib (page sizes in points are preserved, page count is
+  // identical; selectable text is lost — the UI says so next to the action).
+  // With o.targetKB set, walk a (scale, quality) ladder from best quality
+  // down and keep the first build that fits; otherwise a single build at
+  // scale 1.5 and o.quality (default 0.72). Output carries a `fit` report.
+  async function convPdfCompress(file, target, o) {
+    const pdf = await pdfJsDoc(file);
+    const { PDFDocument } = await ensurePdfLib();
+    const targetBytes = parseFloat(o.targetKB || '0') > 0 ? Math.round(parseFloat(o.targetKB) * 1024) : 0;
+    const q0 = o.quality ? Math.min(0.95, Math.max(0.1, parseFloat(o.quality))) : 0.72;
+    async function build(scale, q) {
+      const doc = await PDFDocument.create();
+      for (let p = 1; p <= pdf.numPages; p++) {
+        const page = await pdf.getPage(p);
+        const base = page.getViewport({ scale: 1 });
+        const vp = page.getViewport({ scale });
+        const cv = document.createElement('canvas'); cv.width = Math.max(1, Math.round(vp.width)); cv.height = Math.max(1, Math.round(vp.height));
+        const ctx = cv.getContext('2d');
+        ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, cv.width, cv.height);
+        await page.render({ canvasContext: ctx, viewport: vp }).promise;
+        const jpg = await canvasBlob(cv, 'image/jpeg', q);
+        const img = await doc.embedJpg(new Uint8Array(await jpg.arrayBuffer()));
+        const pg = doc.addPage([base.width, base.height]);
+        pg.drawImage(img, { x: 0, y: 0, width: base.width, height: base.height });
+      }
+      return new Blob([await doc.save()], { type: 'application/pdf' });
+    }
+    const ladder = targetBytes
+      ? [[2, 0.8], [1.75, 0.75], [1.5, 0.7], [1.3, 0.65], [1.15, 0.6], [1, 0.55], [0.85, 0.5], [0.7, 0.45], [0.6, 0.4], [0.5, 0.35]]
+      : [[1.5, q0]];
+    let best = null;
+    for (const [s, q] of ladder) {
+      const blob = await build(s, q);
+      const rec = { blob, scale: s, quality: q, hit: false };
+      if (!best || blob.size < best.blob.size) best = rec;
+      if (targetBytes && blob.size <= targetBytes) { rec.hit = true; best = rec; break; }
+      if (!targetBytes) break;
+    }
+    const r = out(file, '-compressed.pdf', best.blob);
+    r.fit = { targetBytes: targetBytes || null, achievedBytes: best.blob.size, hit: targetBytes ? !!best.hit : null, quality: best.quality, scale: best.scale, pages: pdf.numPages, mode: 'pdf' };
+    return [r];
   }
 
   /* ---------------- data tables ---------------- */
@@ -481,14 +599,17 @@
   function seek(v, t) {
     return new Promise((res) => { const h = () => { v.removeEventListener('seeked', h); res(); }; v.addEventListener('seeked', h); v.currentTime = t; });
   }
-  async function convVideoFrame(file) {
+  async function videoFrameBlob(file) {
     const v = await loadVideo(file);
     try {
       await seek(v, Math.min(1, (v.duration || 2) / 2));
       const cv = document.createElement('canvas'); cv.width = v.videoWidth; cv.height = v.videoHeight;
       cv.getContext('2d').drawImage(v, 0, 0);
-      return [out(file, '-frame.jpg', await canvasBlob(cv, 'image/jpeg', 0.9))];
+      return await canvasBlob(cv, 'image/jpeg', 0.9);
     } finally { URL.revokeObjectURL(v.src); }
+  }
+  async function convVideoFrame(file) {
+    return [out(file, '-frame.jpg', await videoFrameBlob(file))];
   }
   async function convVideoToGif(file) {
     const GIF = await ensureGif();
@@ -510,6 +631,7 @@
   const SC_CONVERTERS = {
     image: convImage, imageToPdf: convImageToPdf,
     pdfToImages: convPdfToImages, pdfToText: convPdfToText, pdfSplit: convPdfSplit, pdfExtract: convPdfExtract,
+    pdfCompress: convPdfCompress,
     table: convTable, subtitle: convSubtitle,
     zipPack: convZipPack, zipExtract: convZipExtract, b64Encode: convB64Encode, b64Decode: convB64Decode,
     videoFrame: convVideoFrame, videoToGif: convVideoToGif,
@@ -534,6 +656,6 @@
     }
   }
 
-  window.SabConvert = { convert, mergePdfs, registry: R, converters: SC_CONVERTERS,
+  window.SabConvert = { convert, mergePdfs, compressPdf: convPdfCompress, imageInfo, pdfThumb, videoThumb: videoFrameBlob, registry: R, converters: SC_CONVERTERS,
     _test: { parseDelimited, emitTable, mdToHtml, mdToTxt, htmlToTxt, parseCues, emitCues, parsePageRange, encodeBMP } };
 })();

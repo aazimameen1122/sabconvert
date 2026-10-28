@@ -24,8 +24,8 @@ The UI only offers routes that pass the automated in-browser harness
 
 | From | To |
 |---|---|
-| Images (JPG, PNG, WebP, BMP, GIF, AVIF) | JPG, PNG, WebP, BMP, GIF, PDF — plus quality, resize, rotate, grayscale |
-| PDF | PNG/JPG per page, TXT, split into pages, extract pages → PDF, **merge multiple PDFs** |
+| Images (JPG, PNG, WebP, BMP, GIF, AVIF) | JPG, PNG, WebP, BMP, GIF, PDF — plus live preview, quality, exact W×H resize, **fit-to-target-KB**, rotate, grayscale |
+| PDF | PNG/JPG per page, TXT, split into pages, extract pages → PDF, **compress to a target size**, **merge multiple PDFs** |
 | CSV / TSV / JSON tables | CSV, TSV, JSON, XML, Markdown table, HTML table |
 | Text / Markdown / HTML | TXT→HTML, TXT→PDF, MD→HTML, MD→TXT, MD→PDF, HTML→TXT |
 | Word (DOCX) | TXT, HTML |
