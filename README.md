@@ -50,6 +50,21 @@ honestly:
    size for this photo ≈ X KB — this target needed a little less")
    instead of pretending nothing was lost.
 
+5. **A smarter JPEG encoder (v2.3)** — with Quality Mode on, JPGs are
+   finished with **MozJPEG** (Mozilla's encoder, Squoosh's WASM build,
+   lazy-loaded only when a JPG is actually encoded — Squoosh is
+   Apache-2.0, MozJPEG BSD-style). It packs the same pixels with
+   optimised Huffman coding and progressive scans. Promised first,
+   measured before shipping: configured with the same fidelity choices
+   the browser's own encoder makes (4:2:0 subsampling, standard quant
+   tables), it came out **9–16% smaller than the browser encoder at
+   the same quality number** on photo-like test images, and every
+   result that used it says "MozJPEG encoder." (Squoosh's default
+   settings measured *larger* than the browser's, so they are not
+   what ships — full A/B tables in `RESULTS.md`.) If the encoder
+   can't load or fails, the conversion silently falls back to the
+   browser encoder; with Quality Mode off, nothing changes at all.
+
 Quality Mode cannot beat physics: below the clean size, softness is
 reported, not hidden. It is ON by default in the UI (image cards and
 Form Mode), OFF when the engine is called without the flag, and it

@@ -224,7 +224,7 @@
       '<label>Max size <input type="number" data-opt="targetKB" min="1" placeholder="e.g. 200"> KB</label>' +
       '<span class="kb-note"></span>' + DEST_CHIPS + '</div>' +
       '<div class="opts qm-row">' +
-      '<label><input type="checkbox" data-opt="qualityMode" checked> Quality Mode — cleans noise + sharpens, so small files stay clear</label></div>';
+      '<label title="Denoise + sharpen-after-resize, and JPGs are finished with the MozJPEG smart encoder — same quality number, smaller file (measured in RESULTS.md)"><input type="checkbox" data-opt="qualityMode" checked> Quality Mode — cleans noise + sharpens, so small files stay clear</label></div>';
     if (it.kind === 'pdf') return '<div class="opts pdf-pages"><label>Pages for “Extract” <input type="text" data-opt="pages" placeholder="e.g. 1-2,4 (blank = page 1)" size="24"></label></div>' +
       '<div class="opts pdf-comp" hidden>' +
       '<label>Quality <input type="range" min="0.35" max="0.9" step="0.01" value="0.72" data-opt="quality"><span class="qv">0.72</span></label>' +
@@ -419,6 +419,7 @@
     let s = '';
     if (f.qualityMode && f.quality != null) s += ' Quality kept ≈ ' + Math.round(f.quality * 100) + '%.';
     if (f.cleanBytes && f.targetBytes && f.cleanBytes > f.targetBytes) s += ' Smallest clean size for this photo ≈ ' + kbNum(f.cleanBytes) + ' KB — this target needed a little less.';
+    if (f.encoder === 'mozjpeg') s += ' MozJPEG encoder.';
     return s;
   }
   function sizeDelta(it, outSize) {
@@ -760,7 +761,7 @@
         if (qn) {
           const qp = document.createElement('p');
           qp.className = 'form-quality-note';
-          qp.textContent = qn;
+          qp.textContent = qn + (r.fit.encoder === 'mozjpeg' ? ' MozJPEG encoder.' : '');
           res.appendChild(qp);
         }
       }

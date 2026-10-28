@@ -24,6 +24,57 @@
   }
   async function ensureGif() { await loadScript('gif.js'); return window.GIF; }
 
+  /* ---------------- MozJPEG smart encoder (lazy, v2.3) ----------------
+   * Squoosh's MozJPEG WASM build (mozjpeg_enc.js + .wasm,
+   * ~285 KB together) is imported ONLY when a JPG encode with Quality
+   * Mode on actually happens; everyone else pays zero bytes. Measured
+   * first, shipped because the gain was real (RESULTS.md v2.3):
+   * configured like the browser encoder it stands in for — 4:2:0
+   * chroma subsampling and the standard quant tables — MozJPEG's
+   * optimised Huffman coding and progressive scans encode the same
+   * pixels 9–16% smaller than canvas at the same quality number.
+   * Squoosh's own default options (automatic subsampling, SSIM quant
+   * table) measured LARGER than canvas and are deliberately not used.
+   * Output is a progressive JPEG; it decodes everywhere a baseline
+   * one does. Every failure — blocked file, no WASM, encode throw —
+   * falls back silently to the canvas encode: a conversion must never
+   * break because the smart encoder did. */
+  let mozModuleP = null;
+  function ensureMozjpeg() {
+    if (!mozModuleP) {
+      mozModuleP = import(new URL('mozjpeg_enc.js', document.baseURI).href)
+        .then(m => (typeof m.default === 'function' ? m.default() : m.default))
+        .then(m => { if (!m || typeof m.encode !== 'function') throw new Error('MozJPEG module has no encode()'); return m; });
+      mozModuleP.catch(() => { mozModuleP = null; }); // a failed load may be retried by a later conversion
+    }
+    return mozModuleP;
+  }
+  const MOZ_OPTS = { baseline: false, arithmetic: false, progressive: true, optimize_coding: true,
+    smoothing: 0, color_space: 3 /* YCbCr */, quant_table: 0 /* standard tables — the ones canvas uses */,
+    trellis_multipass: false, trellis_opt_zero: false, trellis_opt_table: false, trellis_loops: 1,
+    auto_subsample: false, chroma_subsample: 2 /* 4:2:0 — the subsampling canvas uses */,
+    separate_chroma_quality: false };
+  async function mozJpegBlob(cv, q) {
+    const M = await ensureMozjpeg();
+    const img = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height);
+    const qq = Math.min(100, Math.max(1, Math.round(q * 100)));
+    const opts = Object.assign({}, MOZ_OPTS, { quality: qq, chroma_quality: qq });
+    const outp = M.encode(new Uint8Array(img.data), cv.width, cv.height, opts);
+    const u8 = outp instanceof Uint8Array ? outp : new Uint8Array(outp);
+    if (!u8.length || u8[0] !== 0xFF || u8[1] !== 0xD8) throw new Error('MozJPEG produced no JPEG');
+    return new Blob([u8], { type: 'image/jpeg' });
+  }
+  // The final JPG encode of a Quality Mode path: MozJPEG when asked
+  // for, the canvas encode on ANY MozJPEG failure. The returned
+  // encoder says which one actually ran, so results can prove it.
+  async function finalJpeg(cv, q, useMoz) {
+    if (useMoz) {
+      try { return { blob: await mozJpegBlob(cv, q), encoder: 'mozjpeg' }; }
+      catch (e) { /* silent fallback — see the note above */ }
+    }
+    return { blob: await canvasBlob(cv, 'image/jpeg', q), encoder: 'canvas' };
+  }
+
   /* ---------------- HEIC decoding (lazy) ----------------
    * The libheif-based decoder (heic2any, ~1.3 MB) is loaded ONLY when a
    * .heic/.heif file actually arrives; everyone else pays zero bytes.
@@ -308,8 +359,15 @@
         const cv0 = mkCanvas(1);
         const b0 = await canvasBlob(cv0, mime, q0);
         if (b0.size <= targetBytes) {
-          const cleanBytes = qm ? (await canvasBlob(cv0, mime, CLEAN_Q)).size : null;
-          return { blob: b0, info: { targetBytes, achievedBytes: b0.size, hit: true, quality: q0, scale: 1, mode: 'quality', legibility: legibilityOf(q0, 1), qualityMode: qm, cleanBytes } };
+          // Quality Mode + JPG: one MozJPEG encode at the same quality;
+          // it replaces the canvas blob only if it also meets the target.
+          let blob = b0, encoder = 'canvas';
+          if (qm && target === 'jpg') {
+            const fz = await finalJpeg(cv0, q0, true);
+            if (fz.blob.size <= targetBytes) { blob = fz.blob; encoder = fz.encoder; }
+          }
+          const cleanBytes = qm ? (target === 'jpg' ? (await finalJpeg(cv0, CLEAN_Q, true)).blob.size : (await canvasBlob(cv0, mime, CLEAN_Q)).size) : null;
+          return { blob, info: { targetBytes, achievedBytes: blob.size, hit: true, quality: q0, scale: 1, mode: 'quality', legibility: legibilityOf(q0, 1), qualityMode: qm, cleanBytes, encoder } };
         }
       }
       const scales = [1, 0.85, 0.7, 0.55, 0.45, 0.35, 0.27, 0.2, 0.15];
@@ -333,9 +391,20 @@
           if (found) { best = found; break; }
         }
       }
-      let cleanBytes = null;
-      if (qm) cleanBytes = (await canvasBlob(mkCanvas(best.scale), mime, CLEAN_Q)).size;
-      return { blob: best.blob, info: { targetBytes, achievedBytes: best.blob.size, hit: !!best.hit, quality: best.quality, scale: best.scale, mode: target === 'png' ? 'scale' : 'quality+scale', legibility: legibilityOf(best.quality, best.scale), qualityMode: qm, cleanBytes: target === 'png' ? null : cleanBytes } };
+      let blob = best.blob, encoder = 'canvas', cleanBytes = null;
+      if (qm && target !== 'png') {
+        const fcv = mkCanvas(best.scale);
+        // The search above ran on canvas (fast); the winning encode is
+        // redone once with MozJPEG for JPG. Fit correctness beats
+        // encoder pride: the MozJPEG blob is used only when it still
+        // meets the target the canvas encode met.
+        if (target === 'jpg' && best.hit) {
+          const fz = await finalJpeg(fcv, best.quality, true);
+          if (fz.blob.size <= targetBytes) { blob = fz.blob; encoder = fz.encoder; }
+        }
+        cleanBytes = target === 'jpg' ? (await finalJpeg(fcv, CLEAN_Q, true)).blob.size : (await canvasBlob(fcv, mime, CLEAN_Q)).size;
+      }
+      return { blob, info: { targetBytes, achievedBytes: blob.size, hit: !!best.hit, quality: best.quality, scale: best.scale, mode: target === 'png' ? 'scale' : 'quality+scale', legibility: legibilityOf(best.quality, best.scale), qualityMode: qm, cleanBytes: target === 'png' ? null : cleanBytes, encoder } };
     } finally { bmp.close && bmp.close(); }
   }
   // Single-frame GIF fitted under a byte target by stepping the scale down
@@ -374,7 +443,12 @@
           cv = enhanceCanvas(cv, cv.width !== bmp.width || cv.height !== bmp.height);
       } finally { bmp.close && bmp.close(); } }
     const q = o.quality ? Math.min(1, Math.max(0.1, parseFloat(o.quality))) : 0.92;
-    if (target === 'jpg') return [out(file, '.jpg', await canvasBlob(cv, 'image/jpeg', q))];
+    if (target === 'jpg') {
+      // Quality Mode: the final encode goes through MozJPEG (canvas on
+      // any failure). QM off: exactly the v2.2 canvas encode.
+      if (o.qualityMode) { const fz = await finalJpeg(cv, q, true); return [out(file, '.jpg', fz.blob)]; }
+      return [out(file, '.jpg', await canvasBlob(cv, 'image/jpeg', q))];
+    }
     if (target === 'png') return [out(file, '.png', await canvasBlob(cv, 'image/png'))];
     if (target === 'webp') return [out(file, '.webp', await canvasBlob(cv, 'image/webp', q))];
     if (target === 'bmp') return [out(file, '.bmp', encodeBMP(cv))];
@@ -474,8 +548,17 @@
       }
       // Honest report: what this photo costs at clean quality (0.82) at
       // its final dimensions, after enhancement. One extra encode.
-      const cleanBytes = qm ? (await canvasBlob(cv, 'image/jpeg', CLEAN_Q)).size : null;
-      let blob = enc.blob, padded = 0;
+      const cleanBytes = qm ? (await finalJpeg(cv, CLEAN_Q, true)).blob.size : null;
+      let blob = enc.blob, padded = 0, encoder = 'canvas';
+      // Quality Mode: redo the winning encode once with MozJPEG. The
+      // portal window rules, not the encoder: the MozJPEG blob is used
+      // only if it still lands at or under the window max — the
+      // disclosed COM padding below can then lift it into the window
+      // if it fell under the min, exactly as for a canvas encode.
+      if (qm && enc.hit) {
+        const fz = await finalJpeg(cv, enc.quality, true);
+        if (fz.blob.size <= maxBytes) { blob = fz.blob; encoder = fz.encoder; }
+      }
       if (enc.hit && blob.size < minBytes) {
         const aim = Math.min(maxBytes, minBytes + Math.max(512, Math.round((maxBytes - minBytes) * 0.25)));
         const p = await padJpegBlob(blob, aim);
@@ -484,7 +567,7 @@
       const inside = blob.size >= minBytes && blob.size <= maxBytes;
       return { blob, info: { mode: 'window', minBytes, maxBytes, achievedBytes: blob.size, hit: inside && enc.hit,
         quality: enc.quality, scale, padded, width: cv.width, height: cv.height,
-        legibility: legibilityOf(enc.quality, scale), qualityMode: qm, cleanBytes } };
+        legibility: legibilityOf(enc.quality, scale), qualityMode: qm, cleanBytes, encoder } };
     } finally { bmp.close && bmp.close(); }
   }
   // One scanned image -> one PDF under a cap: the image is JPEG-embedded
@@ -1078,5 +1161,5 @@
   }
 
   window.SabConvert = { convert, mergePdfs, compressPdf: convPdfCompress, formFit, imageInfo, pdfThumb, videoThumb: videoFrameBlob, previewSource, registry: R, converters: SC_CONVERTERS,
-    _test: { parseDelimited, emitTable, mdToHtml, mdToTxt, htmlToTxt, parseCues, emitCues, parsePageRange, encodeBMP, parseExifOrientation, parseHeifIrot, padJpegBlob } };
+    _test: { parseDelimited, emitTable, mdToHtml, mdToTxt, htmlToTxt, parseCues, emitCues, parsePageRange, encodeBMP, parseExifOrientation, parseHeifIrot, padJpegBlob, mozJpegBlob } };
 })();
