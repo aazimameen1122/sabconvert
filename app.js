@@ -49,6 +49,123 @@
     R.routeCount() + ' format routes + per-file Base64 & ZIP — images, PDF, tables, documents, subtitles, archives, video.';
   document.getElementById('footRoutes').textContent = 'Routes are verified by an automated in-browser test harness; only routes that pass are listed.';
 
+  /* ---------- v2: tool catalogue (iLovePDF-style grid) ----------
+   * Every entry maps 1:1 to real registry routes: `target` (or
+   * `targetByKind`) is always a value from SC_REGISTRY outputsFor()
+   * for the listed kinds. Resize / Fit-to-KB are modes of the real
+   * image route (jpg output + the card's own resize / target-KB
+   * controls), not separate routes. Merge PDF is the registry's
+   * global op (no per-file target). Form Mode is its own section. */
+  const TOOLS = [
+    { id: 'merge-pdf', title: 'Merge PDF', desc: 'Combine multiple PDFs into one file, in the order you add them.', cat: 'pdf', color: '#e5322d', icon: 'PDF', kinds: ['pdf'], target: null },
+    { id: 'split-pdf', title: 'Split PDF', desc: 'Split a PDF into one file per page.', cat: 'pdf', color: '#4A7AAB', icon: '✂', kinds: ['pdf'], target: 'split' },
+    { id: 'extract-pdf', title: 'Extract PDF Pages', desc: 'Pull selected pages out into a new PDF.', cat: 'pdf', color: '#4A7AAB', icon: 'PDF', kinds: ['pdf'], target: 'extract' },
+    { id: 'compress-pdf', title: 'Compress PDF', desc: 'Make a PDF smaller, optionally to a target size in KB.', cat: 'pdf', color: '#5EA162', icon: 'PDF', kinds: ['pdf'], target: 'compress' },
+    { id: 'pdf-to-jpg', title: 'PDF to JPG', desc: 'Turn every PDF page into a JPG image.', cat: 'pdf', color: '#EE6C4D', icon: 'JPG', kinds: ['pdf'], target: 'jpg' },
+    { id: 'pdf-to-png', title: 'PDF to PNG', desc: 'Turn every PDF page into a PNG image.', cat: 'pdf', color: '#EE6C4D', icon: 'PNG', kinds: ['pdf'], target: 'png' },
+    { id: 'pdf-to-text', title: 'PDF to Text', desc: 'Extract the readable text from a PDF.', cat: 'pdf', color: '#47474f', icon: 'TXT', kinds: ['pdf'], target: 'txt' },
+    { id: 'images-to-pdf', title: 'Images to PDF', desc: 'Turn JPG, PNG and other images into a PDF.', cat: 'pdf', color: '#e5322d', icon: '⇄', kinds: ['image', 'heic'], target: 'pdf' },
+    { id: 'convert-image', title: 'Convert Image', desc: 'Convert between JPG, PNG, WebP, BMP, GIF and AVIF — plus rotate and grayscale.', cat: 'image', color: '#7253E2', icon: 'IMG', kinds: ['image'], target: 'png' },
+    { id: 'heic-to-jpg', title: 'HEIC to JPG', desc: 'Open iPhone HEIC photos as JPG, rotation fixed.', cat: 'image', color: '#AB6993', icon: 'HEIC', kinds: ['heic'], target: 'jpg' },
+    { id: 'resize-image', title: 'Resize Image', desc: 'Resize an image to exact pixels or a percentage, aspect locked.', cat: 'image', color: '#4A7AAB', icon: '⤢', kinds: ['image', 'heic'], target: 'jpg' },
+    { id: 'fit-image-kb', title: 'Fit Image to KB', desc: 'Shrink an image to fit under a target size in KB.', cat: 'image', color: '#5EA162', icon: 'KB', kinds: ['image', 'heic'], target: 'jpg' },
+    { id: 'csv-to-json', title: 'CSV to JSON', desc: 'Turn a CSV table into clean JSON data.', cat: 'data', color: '#5EA162', icon: 'JSON', kinds: ['csv'], target: 'json' },
+    { id: 'table-converter', title: 'Table Converter', desc: 'Convert CSV, TSV and JSON to CSV, TSV, JSON, XML, Markdown or HTML tables.', cat: 'data', color: '#8FBC5D', icon: '⊞', kinds: ['csv', 'tsv', 'json'], target: 'json' },
+    { id: 'md-to-html', title: 'Markdown to HTML', desc: 'Render a Markdown document as an HTML page.', cat: 'data', color: '#47474f', icon: 'MD', kinds: ['md'], target: 'html' },
+    { id: 'md-to-pdf', title: 'Markdown to PDF', desc: 'Turn a Markdown document into a PDF.', cat: 'data', color: '#e5322d', icon: 'MD', kinds: ['md'], target: 'pdf' },
+    { id: 'txt-to-pdf', title: 'Text to PDF', desc: 'Turn a plain text file into a PDF.', cat: 'data', color: '#e5322d', icon: 'TXT', kinds: ['txt'], target: 'pdf' },
+    { id: 'txt-to-html', title: 'Text to HTML', desc: 'Wrap plain text into a simple HTML page.', cat: 'data', color: '#47474f', icon: 'TXT', kinds: ['txt'], target: 'html' },
+    { id: 'docx-to-txt', title: 'DOCX to Text', desc: 'Extract plain text from a Word document.', cat: 'data', color: '#4A7AAB', icon: 'DOC', kinds: ['docx'], target: 'txt' },
+    { id: 'docx-to-html', title: 'DOCX to HTML', desc: 'Convert a Word document to HTML, headings and bold kept.', cat: 'data', color: '#4A7AAB', icon: 'DOC', kinds: ['docx'], target: 'html' },
+    { id: 'html-to-txt', title: 'HTML to Text', desc: 'Strip an HTML page down to its readable text.', cat: 'data', color: '#EE6C4D', icon: 'HTML', kinds: ['html'], target: 'txt' },
+    { id: 'subtitle-converter', title: 'Subtitle Converter', desc: 'Convert subtitles between SRT, VTT and ASS.', cat: 'media', color: '#FFC233', icon: 'CC', kinds: ['srt', 'vtt', 'ass'], targetByKind: { srt: 'vtt', vtt: 'srt', ass: 'srt' } },
+    { id: 'video-to-gif', title: 'Video to GIF', desc: 'Turn a video clip into an animated GIF.', cat: 'media', color: '#7253E2', icon: 'GIF', kinds: ['video'], target: 'gif' },
+    { id: 'video-frame', title: 'Video Frame to JPG', desc: 'Grab a single frame from a video as a JPG.', cat: 'media', color: '#4A7AAB', icon: '▶', kinds: ['video'], target: 'jpg' },
+    { id: 'extract-zip', title: 'Extract ZIP', desc: 'Unpack a ZIP archive into its individual files.', cat: 'archive', color: '#47474f', icon: 'ZIP', kinds: ['zip'], target: 'extract' },
+    { id: 'pack-zip', title: 'Pack to ZIP', desc: 'Pack any file into a ZIP archive.', cat: 'archive', color: '#47474f', icon: 'ZIP', kinds: ['*'], target: 'zip' },
+    { id: 'b64-encode', title: 'Base64 Encode', desc: 'Encode any file as a Base64 (.b64) file.', cat: 'archive', color: '#AB6993', icon: 'B64', kinds: ['*'], target: 'b64' },
+    { id: 'b64-decode', title: 'Base64 Decode', desc: 'Decode a Base64 (.b64) file back to the original.', cat: 'archive', color: '#AB6993', icon: 'B64', kinds: ['b64'], target: 'decode' },
+    { id: 'form-mode', title: 'Form / Exam Mode', desc: 'Fit photos, signatures and certificates into portal size windows — exact pixels, two-sided KB.', cat: 'form', color: '#006c49', icon: '✓', kinds: [], target: null, form: true, isNew: true },
+  ];
+  const toolTitleEl = document.getElementById('toolTitle');
+  const toolSubEl = document.getElementById('toolSub');
+  const resetToolBtn = document.getElementById('resetTool');
+  const DEFAULT_TOOL_TITLE = toolTitleEl ? toolTitleEl.textContent : 'Convert anything';
+  const DEFAULT_TOOL_SUB = toolSubEl ? toolSubEl.textContent : '';
+  let currentTool = null;
+
+  function presetTargetFor(kind) {
+    if (!currentTool) return null;
+    let t = null;
+    if (currentTool.targetByKind) t = currentTool.targetByKind[kind] || null;
+    else if (currentTool.target) {
+      const match = currentTool.kinds.includes('*') || currentTool.kinds.includes(kind);
+      if (match) t = currentTool.target;
+    }
+    if (!t) return null;
+    return R.outputsFor(kind).some(o => o.to === t) ? t : null;
+  }
+  function selectTool(tool) {
+    if (tool.form) {
+      const fm = document.getElementById('formmode');
+      if (fm) fm.scrollIntoView({ behavior: 'smooth' });
+      return;
+    }
+    currentTool = tool;
+    if (toolTitleEl) toolTitleEl.textContent = tool.title;
+    if (toolSubEl) toolSubEl.textContent = tool.desc;
+    if (resetToolBtn) resetToolBtn.hidden = false;
+    for (const it of items) {
+      const t = presetTargetFor(it.kind);
+      if (t) it.target = t;
+    }
+    render();
+    const stage = document.getElementById('converter');
+    if (stage) stage.scrollIntoView({ behavior: 'smooth' });
+  }
+  if (resetToolBtn) resetToolBtn.addEventListener('click', () => {
+    currentTool = null;
+    if (toolTitleEl) toolTitleEl.textContent = DEFAULT_TOOL_TITLE;
+    if (toolSubEl) toolSubEl.textContent = DEFAULT_TOOL_SUB;
+    resetToolBtn.hidden = true;
+    const toolsEl = document.getElementById('tools');
+    if (toolsEl) toolsEl.scrollIntoView({ behavior: 'smooth' });
+  });
+
+  (function renderToolGrid() {
+    const grid = document.getElementById('toolGrid');
+    if (!grid) return;
+    for (const tool of TOOLS) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'tool-card';
+      b.dataset.category = tool.cat;
+      b.dataset.tool = tool.id;
+      if (tool.target) b.dataset.target = tool.target;
+      b.dataset.kinds = tool.kinds.join(',');
+      b.innerHTML = '<span class="tool-icon" aria-hidden="true"></span>' +
+        '<span class="tool-body"><span class="tool-name"></span><span class="tool-desc"></span></span>' +
+        (tool.isNew ? '<span class="new-tag">New!</span>' : '');
+      const ico = b.querySelector('.tool-icon');
+      ico.textContent = tool.icon;
+      ico.style.background = tool.color;
+      b.querySelector('.tool-name').textContent = tool.title;
+      b.querySelector('.tool-desc').textContent = tool.desc;
+      b.addEventListener('click', () => selectTool(tool));
+      grid.appendChild(b);
+    }
+    const pills = document.getElementById('filterPills');
+    if (pills) pills.addEventListener('click', (e) => {
+      const pill = e.target.closest('.fpill');
+      if (!pill) return;
+      pills.querySelectorAll('.fpill').forEach(p => p.classList.toggle('active', p === pill));
+      const f = pill.dataset.filter;
+      grid.querySelectorAll('.tool-card').forEach(c => {
+        c.style.display = (f === 'all' || c.dataset.category === f) ? '' : 'none';
+      });
+    });
+  })();
+
   /* ---------- lightbox (one overlay for all previews) ---------- */
   const lightbox = document.createElement('div');
   lightbox.id = 'lightbox'; lightbox.hidden = true;
@@ -72,7 +189,7 @@
   function addFiles(files) {
     for (const f of files) {
       const kind = R.classify(f);
-      items.push({ id: ++seq, file: f, kind, target: null, status: 'ready', results: [], error: '', options: {} });
+      items.push({ id: ++seq, file: f, kind, target: presetTargetFor(kind), status: 'ready', results: [], error: '', options: {} });
     }
     render();
   }

@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SabConvert — every format, one place. Files never leave your device.</title>
-<meta name="description" content="Free all-format file converter that runs entirely in your browser. Images, PDF, tables, documents, subtitles, archives, video frames — no upload, no server.">
+<title>SabConvert — every tool you need to work with files, in one place</title>
+<meta name="description" content="Free all-format file converter that runs entirely in your browser. Images, PDF, tables, documents, subtitles, archives, video frames — no upload, no server, no account.">
 <link rel="stylesheet" href="style.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%234f46e5'/><text y='0.72em' x='0.08em' font-size='72' fill='white'>⇄</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%23e5322d'/><text y='0.72em' x='0.08em' font-size='72' fill='white'>⇄</text></svg>">
 </head>
 <body>
 
@@ -15,35 +15,48 @@
     <span class="brand-mark" aria-hidden="true">⇄</span>
     <span class="brand-name">SabConvert</span>
   </a>
-  <span class="privacy-pill"><span class="dot" aria-hidden="true"></span>100% private — files never leave your device</span>
   <span class="nav-links">
+    <a href="#tools">All Tools</a>
     <a href="#converter">Converter</a>
     <a href="#formmode">Form Mode</a>
-    <a href="#formats">Supported Formats</a>
-    <a href="#privacy">Privacy</a>
+    <a href="#why">Why SabConvert</a>
   </span>
+  <span class="privacy-pill"><span class="dot" aria-hidden="true"></span>100% private — no uploads</span>
   <span class="offline-ind"><span class="dot" aria-hidden="true"></span><span id="offlineText">Offline Ready</span></span>
 </nav>
 
 <main>
-  <section class="stage" id="converter">
-    <p class="eyebrow"><span aria-hidden="true">⚡</span> 100% CLIENT-SIDE &nbsp;·&nbsp; Zero Uploads &nbsp;·&nbsp; No Sign-ups</p>
-    <h1 class="hero-title">Convert files instantly, right inside your browser.</h1>
-    <p class="hero-sub">All processing runs locally on your device. Your confidential files never touch an external cloud server.</p>
+  <section class="hero">
+    <h1 class="hero-title">Every tool you need to work with files, in one place</h1>
+    <p class="hero-sub">Every tool is free and runs entirely in your browser. Your files never leave your device — there is no server to upload them to.</p>
     <p class="stats" id="routeStats"></p>
+  </section>
+
+  <section class="tools-wrap" id="tools">
+    <div class="filter-pills" id="filterPills" role="tablist" aria-label="Filter tools">
+      <button type="button" class="fpill active" data-filter="all">All</button>
+      <button type="button" class="fpill" data-filter="pdf">PDF Tools</button>
+      <button type="button" class="fpill" data-filter="image">Images</button>
+      <button type="button" class="fpill" data-filter="data">Data &amp; Text</button>
+      <button type="button" class="fpill" data-filter="media">Media</button>
+      <button type="button" class="fpill" data-filter="archive">Archives &amp; Base64</button>
+      <button type="button" class="fpill" data-filter="form">Form Mode</button>
+    </div>
+    <div class="tool-grid" id="toolGrid"></div>
+  </section>
+
+  <section class="stage" id="converter">
+    <div class="tool-head">
+      <button type="button" id="resetTool" class="reset-tool" hidden>← All tools · Convert anything</button>
+      <h2 id="toolTitle">Convert anything</h2>
+      <p id="toolSub">Drop any supported file and pick its output format — conversion happens on your device.</p>
+    </div>
 
     <div class="dz-card">
       <div id="dropzone" tabindex="0" role="button" aria-label="Add files">
-        <div class="dz-visual" aria-hidden="true">
-          <span class="dz-tag tag-a">.pdf</span>
-          <span class="dz-tag tag-b">.csv</span>
-          <span class="dz-icon">⇄</span>
-          <span class="dz-tag tag-c">.mp4</span>
-          <span class="dz-tag tag-d">.jpg</span>
-        </div>
-        <p class="dz-big">Drag &amp; drop files here, or click to pick files</p>
+        <span class="btn-primary dz-browse">Select files</span>
+        <p class="dz-big">or drop files here</p>
         <p class="dz-small">Full on-device processing &nbsp;•&nbsp; Unlimited batch conversions</p>
-        <span class="btn-primary dz-browse">Browse Local Files</span>
         <p class="dz-lock"><span aria-hidden="true">🔒</span> Local only — nothing is uploaded, ever</p>
         <input type="file" id="fileInput" multiple hidden>
       </div>
@@ -64,13 +77,19 @@
       <span class="toolbar-actions">
         <button id="clearAll" class="ghost">Clear all</button>
         <button id="mergePdfs" class="ghost" hidden>Merge all PDFs into one</button>
-        <button id="convertAll" class="primary">⚡ Convert all</button>
+        <button id="convertAll" class="primary">Convert all</button>
       </span>
     </div>
 
     <section id="cards"></section>
     <section id="mergeResult"></section>
     <p id="zipAlt" class="zip-alt" hidden>…or <button id="downloadAll" type="button">get all files as one ZIP</button></p>
+  </section>
+
+  <section class="steps-strip" aria-label="How it works">
+    <div class="step"><span class="step-n">1</span><p><strong>Select your files</strong>Drop them above or pick a tool first.</p></div>
+    <div class="step"><span class="step-n">2</span><p><strong>Choose the tool &amp; convert</strong>Everything runs locally in your browser.</p></div>
+    <div class="step"><span class="step-n">3</span><p><strong>Download</strong>Files never leave your device.</p></div>
   </section>
 
   <section class="wide" id="formmode">
@@ -104,50 +123,16 @@
 
   <section class="wide" id="formats">
     <div class="sec-head">
-      <h2>Supported Local Formats</h2>
-      <p>Every format below is converted on your device — these are exactly the routes the converter offers, nothing more.</p>
-    </div>
-    <div class="fmt-grid">
-      <article class="fmt-card">
-        <div class="fmt-icon img">▦</div>
-        <h3>Images</h3>
-        <p>Convert between formats with a live preview — resize to exact pixels or a target KB, tune quality, rotate and grayscale. iPhone HEIC photos decode right here too, rotation fixed.</p>
-        <div class="tags"><span>JPG</span><span>PNG</span><span>WEBP</span><span>GIF</span><span>BMP</span><span>AVIF</span><span>HEIC → JPG</span><span>→ PDF</span></div>
-      </article>
-      <article class="fmt-card">
-        <div class="fmt-icon doc">≣</div>
-        <h3>Documents &amp; PDF</h3>
-        <p>Turn PDF pages into images or text, split, merge and compress PDFs to a target size, and make documents from text and Markdown.</p>
-        <div class="tags"><span>PDF</span><span>DOCX</span><span>TXT</span><span>MD</span><span>HTML</span></div>
-      </article>
-      <article class="fmt-card">
-        <div class="fmt-icon tbl">⊞</div>
-        <h3>Tabular Data</h3>
-        <p>Reshape spreadsheet data between formats — values and quoted text survive the round trip.</p>
-        <div class="tags"><span>CSV</span><span>TSV</span><span>JSON</span><span>XML</span></div>
-      </article>
-      <article class="fmt-card">
-        <div class="fmt-icon vid">▶</div>
-        <h3>Video &amp; Frames</h3>
-        <p>Grab a frame from a video as an image, or turn a clip into an animated GIF.</p>
-        <div class="tags"><span>MP4</span><span>WEBM</span><span>MOV</span><span>M4V</span><span>→ GIF</span></div>
-      </article>
-      <article class="fmt-card">
-        <div class="fmt-icon sub">CC</div>
-        <h3>Subtitles &amp; Captions</h3>
-        <p>Convert subtitle files between the three common formats — cue text and timings preserved.</p>
-        <div class="tags"><span>SRT</span><span>VTT</span><span>ASS</span></div>
-      </article>
-      <article class="fmt-card">
-        <div class="fmt-icon arc">🗜</div>
-        <h3>Archives &amp; Base64</h3>
-        <p>Pack any files into a ZIP, unpack a ZIP in place, or encode and decode Base64 files.</p>
-        <div class="tags"><span>ZIP</span><span>B64</span></div>
-      </article>
+      <h2>Supported formats</h2>
+      <p>Images JPG · PNG · WebP · BMP · GIF · AVIF · HEIC → PDF too &nbsp;·&nbsp; PDF · DOCX · TXT · MD · HTML &nbsp;·&nbsp; CSV · TSV · JSON · XML &nbsp;·&nbsp; SRT · VTT · ASS &nbsp;·&nbsp; MP4 · WebM · MOV → GIF / JPG &nbsp;·&nbsp; ZIP · Base64 — exactly the routes the converter offers, nothing more.</p>
     </div>
   </section>
 
-  <section class="wide" id="privacy">
+  <section class="wide" id="why">
+    <div class="nopremium">
+      <h2>No Premium. No accounts. No daily limits.</h2>
+      <p>Every tool is free — because the processing happens on <strong>YOUR device</strong>, not our servers. There is nothing to upsell: no upload queue, no file-size tier, no sign-up wall.</p>
+    </div>
     <div class="privacy-panel">
       <p class="eyebrow center"><span aria-hidden="true">🛡</span> Privacy by architecture</p>
       <h2 class="privacy-title">Why SabConvert is fundamentally more private</h2>
@@ -178,7 +163,7 @@
 <footer>
   <span class="foot-brand">SabConvert</span>
   <span class="foot-note">Browser-native file processing · Inspired by <a href="https://github.com/KnifeLemon/Filee">Filee</a> (MIT) — original implementation.</span>
-  <span class="foot-links"><span class="foot-priv">🔒 Zero server telemetry</span> · <a href="#privacy">Privacy</a> · <a href="https://github.com/aazimameen1122/sabconvert">GitHub Repository</a></span>
+  <span class="foot-links"><span class="foot-priv">🔒 Zero server telemetry</span> · <a href="#why">Privacy</a> · <a href="https://github.com/aazimameen1122/sabconvert">GitHub Repository</a></span>
   <p id="footRoutes"></p>
 </footer>
 

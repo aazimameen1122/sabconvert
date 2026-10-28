@@ -6,6 +6,16 @@ JavaScript. Close the network tab and watch — nothing leaves the machine.
 
 **Live:** https://aazimameen1122.github.io/sabconvert/ (once deployed — see `deploy.sh`)
 
+**Design (v2):** iLovePDF-style flow, from an REA of ilovepdf.com — a
+filterable grid of 29 tool cards (each one a real route below), a tool
+stage with a big red "Select files" pill, and a dark footer, on brand
+red `#e5322d` / `#f5f5fa`. Only the look and flow were adopted: unlike
+iLovePDF there is **no server, no upload, no account and no Premium** —
+conversion still happens entirely in the visitor's browser. See
+`RESULTS.md` ("v2") for what was copied, what was deliberately not
+copied (Drive/Dropbox pickers, server processing, Graphik font), and
+the harness evidence.
+
 ## Run locally
 
 Any static server, no build step:
