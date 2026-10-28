@@ -202,6 +202,65 @@
   function canvasBlob(cv, type, q) {
     return new Promise((res, rej) => cv.toBlob(b => b ? res(b) : rej(new Error('canvas encode failed: ' + type)), type, q));
   }
+  /* ---------------- Quality Mode enhancement ----------------
+   * denoise: composite a 1px-blurred copy over the original at low alpha
+   * (surface-blur lite). Sensor noise is high-frequency detail the encoder
+   * spends bytes on without adding anything a viewer wants; softening it
+   * first makes lossy encodes smaller at the same settings. Browsers that
+   * ignore ctx.filter skip this silently.
+   * sharpen: one 3×3 unsharp convolution (a = 0.2) restores the edge bite
+   * that resizing takes away. Skipped above 1600 px on either side
+   * (per-pixel JS cost) — those images keep their detail natively
+   * anyway. Alpha is copied through untouched.
+   * Rule (measured, see RESULTS.md v2.2): denoise applies on every lossy
+   * Quality Mode path, but sharpen ONLY when the output dimensions
+   * differ from the source — sharpening an un-resized noisy photo
+   * re-amplifies per-pixel noise (+15.8% bytes at q0.92, measured) and
+   * buys nothing; after a real resize it restores the edge step (+12%)
+   * and fits come out smaller. Callers pass the resize fact in. */
+  function denoiseCanvas(cv) {
+    try {
+      const t = document.createElement('canvas'); t.width = cv.width; t.height = cv.height;
+      const tctx = t.getContext('2d');
+      let supported = false;
+      try { tctx.filter = 'blur(1px)'; supported = tctx.filter === 'blur(1px)'; } catch (e) { /* no filter support */ }
+      if (!supported) return cv;
+      tctx.drawImage(cv, 0, 0);
+      // Composite on a FRESH canvas and return it: the source canvas's
+      // context may carry a leftover translate/rotate from drawImageCanvas,
+      // and resetting it with setTransform(a,b,c,d,e,f) throws in some
+      // browsers — a fresh context is identity by construction.
+      const out = document.createElement('canvas'); out.width = cv.width; out.height = cv.height;
+      const octx = out.getContext('2d');
+      octx.drawImage(cv, 0, 0);
+      octx.globalAlpha = 0.28;
+      octx.drawImage(t, 0, 0);
+      return out;
+    } catch (e) { /* enhancement is best-effort */ }
+    return cv;
+  }
+  function sharpenCanvas(cv) {
+    const w = cv.width, h = cv.height;
+    if (w > 1600 || h > 1600 || w < 3 || h < 3) return cv;
+    try {
+      const ctx = cv.getContext('2d');
+      const img = ctx.getImageData(0, 0, w, h), src = img.data;
+      const outp = new Uint8ClampedArray(src); // alpha (and borders) copied as-is
+      const a = 0.2, row = w * 4;
+      for (let y = 1; y < h - 1; y++) {
+        for (let x = 1; x < w - 1; x++) {
+          const i = (y * w + x) * 4;
+          for (let c = 0; c < 3; c++) {
+            outp[i + c] = src[i + c] * (1 + 4 * a) - a * (src[i - row + c] + src[i + row + c] + src[i - 4 + c] + src[i + 4 + c]);
+          }
+        }
+      }
+      ctx.putImageData(new ImageData(outp, w, h), 0, 0);
+    } catch (e) { /* best-effort */ }
+    return cv;
+  }
+  function enhanceCanvas(cv, sharpen) { const d = denoiseCanvas(cv); if (sharpen) sharpenCanvas(d); return d; }
+
   function encodeBMP(cv) {
     const w = cv.width, h = cv.height;
     const img = cv.getContext('2d').getImageData(0, 0, w, h).data;
@@ -234,27 +293,38 @@
   // quality at the largest size first, then step the scale down. PNG is
   // lossless, so only the scale can shrink it (reported honestly as such).
   // Returns { blob, info } where info.hit says whether the target was met.
+  const CLEAN_Q = 0.82; // the quality we call "clean" for honest size reports
   async function fitImage(file, target, o, targetBytes) {
     const bmp = await decodeImageBitmap(file);
     try {
       const mime = MIME[target];
+      // Quality Mode enhancement applies to lossy targets only (PNG is
+      // lossless — shrinking it is scale-only, reported as before).
+      const qm = !!o.qualityMode && (target === 'jpg' || target === 'webp');
+      // Sharpen only when this scale step actually resizes (s < 1).
+      const mkCanvas = (s) => { const cv = drawImageCanvas(bmp, o, s); return qm ? enhanceCanvas(cv, s < 1) : cv; };
       if (target !== 'png') { // fast path: the normal encode may already fit
         const q0 = o.quality ? Math.min(1, Math.max(0.1, parseFloat(o.quality))) : 0.92;
-        const b0 = await canvasBlob(drawImageCanvas(bmp, o, 1), mime, q0);
-        if (b0.size <= targetBytes) return { blob: b0, info: { targetBytes, achievedBytes: b0.size, hit: true, quality: q0, scale: 1, mode: 'quality', legibility: legibilityOf(q0, 1) } };
+        const cv0 = mkCanvas(1);
+        const b0 = await canvasBlob(cv0, mime, q0);
+        if (b0.size <= targetBytes) {
+          const cleanBytes = qm ? (await canvasBlob(cv0, mime, CLEAN_Q)).size : null;
+          return { blob: b0, info: { targetBytes, achievedBytes: b0.size, hit: true, quality: q0, scale: 1, mode: 'quality', legibility: legibilityOf(q0, 1), qualityMode: qm, cleanBytes } };
+        }
       }
       const scales = [1, 0.85, 0.7, 0.55, 0.45, 0.35, 0.27, 0.2, 0.15];
       let best = null;
       const consider = (rec) => { if (!best || rec.blob.size < best.blob.size) best = rec; };
       for (const s of scales) {
-        const cv = drawImageCanvas(bmp, o, s);
+        const cv = mkCanvas(s);
         if (target === 'png') {
           const blob = await canvasBlob(cv, 'image/png');
           consider({ blob, scale: s, quality: null });
           if (blob.size <= targetBytes) { best = { blob, scale: s, quality: null, hit: true }; break; }
         } else {
           let lo = 0.05, hi = 0.95, found = null;
-          for (let i = 0; i < 7; i++) {
+          const iters = qm ? 9 : 7; // QM: finer steps — quality is given up last and least
+          for (let i = 0; i < iters; i++) {
             const q = (lo + hi) / 2;
             const blob = await canvasBlob(cv, mime, q);
             consider({ blob, scale: s, quality: q });
@@ -263,7 +333,9 @@
           if (found) { best = found; break; }
         }
       }
-      return { blob: best.blob, info: { targetBytes, achievedBytes: best.blob.size, hit: !!best.hit, quality: best.quality, scale: best.scale, mode: target === 'png' ? 'scale' : 'quality+scale', legibility: legibilityOf(best.quality, best.scale) } };
+      let cleanBytes = null;
+      if (qm) cleanBytes = (await canvasBlob(mkCanvas(best.scale), mime, CLEAN_Q)).size;
+      return { blob: best.blob, info: { targetBytes, achievedBytes: best.blob.size, hit: !!best.hit, quality: best.quality, scale: best.scale, mode: target === 'png' ? 'scale' : 'quality+scale', legibility: legibilityOf(best.quality, best.scale), qualityMode: qm, cleanBytes: target === 'png' ? null : cleanBytes } };
     } finally { bmp.close && bmp.close(); }
   }
   // Single-frame GIF fitted under a byte target by stepping the scale down
@@ -293,7 +365,14 @@
       const r = out(file, '.gif', fit.blob); r.fit = fit.info;
       return [r];
     }
-    const cv = await imageCanvas(file, o);
+    let cv;
+    { const bmp = await decodeImageBitmap(file);
+      try { cv = drawImageCanvas(bmp, o, 1);
+        // Sharpen only when the drawn size differs from the decoded
+        // source size — i.e. the options actually resized the image.
+        if (o.qualityMode && (target === 'jpg' || target === 'webp'))
+          cv = enhanceCanvas(cv, cv.width !== bmp.width || cv.height !== bmp.height);
+      } finally { bmp.close && bmp.close(); } }
     const q = o.quality ? Math.min(1, Math.max(0.1, parseFloat(o.quality))) : 0.92;
     if (target === 'jpg') return [out(file, '.jpg', await canvasBlob(cv, 'image/jpeg', q))];
     if (target === 'png') return [out(file, '.png', await canvasBlob(cv, 'image/png'))];
@@ -358,10 +437,10 @@
   }
   // Largest JPEG encode of cv that is <= maxBytes (binary search on
   // quality). Falls back to the smallest encode when nothing fits.
-  async function largestJpegUnder(cv, maxBytes) {
+  async function largestJpegUnder(cv, maxBytes, iters) {
     let best = null, smallest = null;
     let lo = 0.05, hi = 1;
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < (iters || 8); i++) {
       const q = (lo + hi) / 2;
       const blob = await canvasBlob(cv, 'image/jpeg', q);
       if (!smallest || blob.size < smallest.blob.size) smallest = { blob, quality: q };
@@ -376,17 +455,26 @@
       const minBytes = Math.round((spec.minKB || 0) * 1024);
       const maxBytes = Math.round(spec.maxKB * 1024);
       const hasDims = spec.width > 0 && spec.height > 0;
+      const qm = !!o.qualityMode;
+      const iters = qm ? 10 : 8; // QM: finer steps — quality is given up last and least
       let cv = hasDims ? cropToBox(bmp, spec.width, spec.height, o.cropX, o.cropY)
         : drawImageCanvas(bmp, {}, 1);
-      let enc = await largestJpegUnder(cv, maxBytes);
+      // Crop-to-exact-size counts as a resize -> sharpen; a native-size
+      // draw (no fixed box) gets denoise only.
+      if (qm) cv = enhanceCanvas(cv, hasDims);
+      let enc = await largestJpegUnder(cv, maxBytes, iters);
       let scale = 1;
       if (!enc.hit && !hasDims) { // no fixed size: shrink until it fits
         for (const s of [0.7, 0.5, 0.35, 0.25]) {
           cv = drawImageCanvas(bmp, {}, s); scale = s;
-          enc = await largestJpegUnder(cv, maxBytes);
+          if (qm) cv = enhanceCanvas(cv, true); // s < 1: a real resize
+          enc = await largestJpegUnder(cv, maxBytes, iters);
           if (enc.hit) break;
         }
       }
+      // Honest report: what this photo costs at clean quality (0.82) at
+      // its final dimensions, after enhancement. One extra encode.
+      const cleanBytes = qm ? (await canvasBlob(cv, 'image/jpeg', CLEAN_Q)).size : null;
       let blob = enc.blob, padded = 0;
       if (enc.hit && blob.size < minBytes) {
         const aim = Math.min(maxBytes, minBytes + Math.max(512, Math.round((maxBytes - minBytes) * 0.25)));
@@ -396,7 +484,7 @@
       const inside = blob.size >= minBytes && blob.size <= maxBytes;
       return { blob, info: { mode: 'window', minBytes, maxBytes, achievedBytes: blob.size, hit: inside && enc.hit,
         quality: enc.quality, scale, padded, width: cv.width, height: cv.height,
-        legibility: legibilityOf(enc.quality, scale) } };
+        legibility: legibilityOf(enc.quality, scale), qualityMode: qm, cleanBytes } };
     } finally { bmp.close && bmp.close(); }
   }
   // One scanned image -> one PDF under a cap: the image is JPEG-embedded

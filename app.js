@@ -222,7 +222,9 @@
       '<span class="dims"></span></div>' +
       '<div class="opts img-kb">' +
       '<label>Max size <input type="number" data-opt="targetKB" min="1" placeholder="e.g. 200"> KB</label>' +
-      '<span class="kb-note"></span>' + DEST_CHIPS + '</div>';
+      '<span class="kb-note"></span>' + DEST_CHIPS + '</div>' +
+      '<div class="opts qm-row">' +
+      '<label><input type="checkbox" data-opt="qualityMode" checked> Quality Mode — cleans noise + sharpens, so small files stay clear</label></div>';
     if (it.kind === 'pdf') return '<div class="opts pdf-pages"><label>Pages for “Extract” <input type="text" data-opt="pages" placeholder="e.g. 1-2,4 (blank = page 1)" size="24"></label></div>' +
       '<div class="opts pdf-comp" hidden>' +
       '<label>Quality <input type="range" min="0.35" max="0.9" step="0.01" value="0.72" data-opt="quality"><span class="qv">0.72</span></label>' +
@@ -409,6 +411,16 @@
     });
   }
 
+  const kbNum = (b) => { const k = b / 1024; return k >= 10 ? k.toFixed(0) : k.toFixed(1); };
+  // Quality Mode reporting, appended to fit lines: how much quality the
+  // fit managed to keep, and — when the target forced the photo below its
+  // clean size — the honest clean size itself.
+  function qmSuffix(f) {
+    let s = '';
+    if (f.qualityMode && f.quality != null) s += ' Quality kept ≈ ' + Math.round(f.quality * 100) + '%.';
+    if (f.cleanBytes && f.targetBytes && f.cleanBytes > f.targetBytes) s += ' Smallest clean size for this photo ≈ ' + kbNum(f.cleanBytes) + ' KB — this target needed a little less.';
+    return s;
+  }
   function sizeDelta(it, outSize) {
     const inn = it.file.size;
     if (!inn) return fmtSize(outSize);
@@ -431,9 +443,10 @@
     if (f.mode === 'gif') return f.hit
       ? 'Target met: ' + fmtSize(f.achievedBytes) + ' ≤ ' + fmtSize(f.targetBytes) + ' (GIF fitted by shrinking dimensions' + (f.scale < 1 ? ' to ' + Math.round(f.scale * 100) + '%' : '') + ').'
       : 'Couldn’t reach ' + fmtSize(f.targetBytes) + ' — the smallest GIF we got was ' + fmtSize(f.achievedBytes) + '.';
-    return f.hit
+    const base = f.hit
       ? 'Target met: ' + fmtSize(f.achievedBytes) + ' (quality ' + (f.quality != null ? f.quality.toFixed(2) : '—') + (f.scale < 1 ? ', resized to ' + Math.round(f.scale * 100) + '%' : '') + ').'
       : 'Couldn’t go below ' + fmtSize(f.achievedBytes) + ' at readable quality (target was ' + fmtSize(f.targetBytes) + ').';
+    return base + qmSuffix(f);
   }
 
   function paintResults(it, resultsEl, statusEl) {
@@ -594,6 +607,8 @@
   formPresetSel.addEventListener('change', syncPresetChips);
   formPresetSel.addEventListener('change', () => { paintFormHint(); rerunFormItems(); });
   formCustomEl.addEventListener('change', () => { paintFormHint(); rerunFormItems(); });
+  const formQualityMode = document.getElementById('formQualityMode');
+  if (formQualityMode) formQualityMode.addEventListener('change', () => rerunFormItems());
   formDrop.addEventListener('click', () => formInput.click());
   formDrop.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); formInput.click(); } });
   formInput.addEventListener('change', () => { addFormFiles([...formInput.files]); formInput.value = ''; });
@@ -706,7 +721,7 @@
     statusEl.textContent = 'Fitting…'; statusEl.className = 'form-status';
     it.spec = currentFormSpec();
     try {
-      it.results = await window.SabConvert.formFit(it.file, it.spec, { cropX: it.cropX, cropY: it.cropY });
+      it.results = await window.SabConvert.formFit(it.file, it.spec, { cropX: it.cropX, cropY: it.cropY, qualityMode: !!(formQualityMode && formQualityMode.checked) });
       it.status = 'done'; it.error = '';
       paintFormResults(it, card);
     } catch (e) {
@@ -738,6 +753,17 @@
       p.className = 'form-check ' + (chk.ok ? 'ok' : 'bad');
       p.textContent = chk.text;
       res.appendChild(p);
+      if (it.spec && it.spec.type === 'image' && r.fit && r.fit.cleanBytes != null) {
+        let qn = null;
+        if (r.fit.cleanBytes > it.spec.maxKB * 1024) qn = 'Smallest clean size for this photo ≈ ' + kbNum(r.fit.cleanBytes) + ' KB — this portal window needed a little less, expect slight softness.';
+        else if (r.fit.qualityMode) qn = 'Quality Mode kept this one clean.';
+        if (qn) {
+          const qp = document.createElement('p');
+          qp.className = 'form-quality-note';
+          qp.textContent = qn;
+          res.appendChild(qp);
+        }
+      }
       if (r.fit && r.fit.legibility === 'low') {
         const warn = document.createElement('p');
         warn.className = 'warn-legible';

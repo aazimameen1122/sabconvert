@@ -26,6 +26,43 @@ lands inside its window gives its card a green left border next to the
 green check line. Presentation and guidance only: the form engine is
 untouched. See `RESULTS.md` ("v2.1").
 
+**Quality Mode (v2.2):** "make it 10–20 KB, but the quality must not
+drop" — zero loss at any size is physically impossible, so Quality Mode
+does the four things that are actually possible, and reports the rest
+honestly:
+
+1. **Denoise before encoding** — a 1px-blurred copy is blended back at
+   28% (surface-blur lite). Sensor noise costs encoder bytes and adds
+   nothing a viewer wants; measured alone on a noisy 400×300 test image
+   it shrinks a q0.92 JPEG by **9.5%** (80,137 → 72,495 bytes).
+2. **Sharpen after resizing** — when (and only when) a conversion
+   actually resizes the image, one 3×3 unsharp convolution (a = 0.2)
+   sharpens edges after the resize, restoring the bite resizing takes
+   away (skipped above 1600 px, where detail is native). Measured on
+   a blurred-boundary edge resized 800×600 → 400×300: steepest step
+   50 → 52.
+3. **Finer quality-first fitting** — with Quality Mode on, the target-KB
+   and form-window searches run extra binary-search iterations, so
+   quality is given up last and least.
+4. **An honest clean size** — every fit reports the smallest size that
+   still counts as clean for that photo (its size at quality 0.82). If
+   your target is below it, the result line says so ("Smallest clean
+   size for this photo ≈ X KB — this target needed a little less")
+   instead of pretending nothing was lost.
+
+Quality Mode cannot beat physics: below the clean size, softness is
+reported, not hidden. It is ON by default in the UI (image cards and
+Form Mode), OFF when the engine is called without the flag, and it
+never applies to lossless outputs (PNG/BMP/GIF). Why sharpen waits
+for a resize, kept honest: measured on synthetic all-noise images,
+sharpening an un-resized photo re-amplifies its own noise — the
+sharpen step alone added +15.8% bytes at q0.92, more than denoise
+saves. So at full size Quality Mode is denoise-only (a noisy 400×300
+test image shrinks 8.7%: 80,123 → 73,113 bytes), and sharpen is
+reserved for where it pays: after a resize, and in fits — the test
+photo fitted to 6 KB came out at 5,867 bytes with QM vs 5,925
+without. Full measurements in `RESULTS.md` ("v2.2").
+
 ## Run locally
 
 Any static server, no build step:

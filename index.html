@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SabConvert — every tool you need to work with files, in one place</title>
 <meta name="description" content="Free all-format file converter that runs entirely in your browser. Images, PDF, tables, documents, subtitles, archives, video frames — no upload, no server, no account.">
-<link rel="stylesheet" href="style.css?v=3">
+<link rel="stylesheet" href="style.css?v=4">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%23e5322d'/><text y='0.72em' x='0.08em' font-size='72' fill='white'>⇄</text></svg>">
 </head>
 <body>
@@ -127,6 +127,7 @@
         <label class="form-preset-label">I am filling
           <select id="formPreset"></select>
         </label>
+        <label class="form-qm"><input type="checkbox" id="formQualityMode" checked> Quality Mode (cleaner small files)</label>
         <span class="form-custom" id="formCustom" hidden>
           <label>For <select id="fcType"><option value="image">Photo / signature</option><option value="doc">Certificate PDF</option></select></label>
           <label>Min <input type="number" id="fcMin" min="0" value="10"> KB</label>
@@ -205,9 +206,9 @@
     addEventListener('online', paint); addEventListener('offline', paint); paint();
   })();
 </script>
-<script src="jszip.min.js?v=3"></script>
-<script src="routes.js?v=3"></script>
-<script src="converters.js?v=3"></script>
-<script src="app.js?v=3"></script>
+<script src="jszip.min.js?v=4"></script>
+<script src="routes.js?v=4"></script>
+<script src="converters.js?v=4"></script>
+<script src="app.js?v=4"></script>
 </body>
 </html>
