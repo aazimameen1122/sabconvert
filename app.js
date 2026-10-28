@@ -9,8 +9,40 @@
   const summary = document.getElementById('summary');
   const mergeBtn = document.getElementById('mergePdfs');
   const dlAllBtn = document.getElementById('downloadAll');
+  const zipAltEl = document.getElementById('zipAlt');
   const mergeResultEl = document.getElementById('mergeResult');
   let items = [], seq = 0;
+  let mergeResults = [];
+
+  // The ZIP is a secondary extra only: it appears once 2+ converted files
+  // exist, as a quiet text link under the results — never as the way to
+  // download. Every result above it is already its own direct download.
+  function totalResults() {
+    return items.reduce((s, i) => s + i.results.length, 0) + mergeResults.length;
+  }
+  function paintZipAlt() {
+    const n = totalResults();
+    zipAltEl.hidden = n < 2;
+    if (n >= 2) dlAllBtn.textContent = 'get all ' + n + ' files as one ZIP';
+  }
+
+  // One result = one obvious download button (real filename + size note).
+  function dlRow(r, szText) {
+    const row = document.createElement('div'); row.className = 'dl-row';
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(r.blob); a.download = r.name; a.className = 'dl';
+    const ico = document.createElement('span');
+    ico.className = 'dl-ico'; ico.setAttribute('aria-hidden', 'true'); ico.textContent = '⬇';
+    const nm = document.createElement('span');
+    nm.className = 'dl-name'; nm.textContent = r.name;
+    const act = document.createElement('span');
+    act.className = 'dl-act'; act.textContent = 'Download';
+    a.appendChild(ico); a.appendChild(nm); a.appendChild(act);
+    const sz = document.createElement('span');
+    sz.className = 'sz'; sz.textContent = szText;
+    row.appendChild(a); row.appendChild(sz);
+    return row;
+  }
 
   const fmtSize = (n) => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(2) + ' MB';
   document.getElementById('routeStats').textContent =
@@ -115,7 +147,7 @@
     const pdfCount = items.filter(i => i.kind === 'pdf').length;
     mergeBtn.hidden = pdfCount < 2;
     const done = items.filter(i => i.status === 'done').length;
-    dlAllBtn.hidden = !items.some(i => i.results.length) && !mergeResultEl.children.length;
+    paintZipAlt();
     summary.textContent = items.length ? items.length + ' file(s)' + (done ? ' · ' + done + ' converted' : '') : '';
     cardsEl.innerHTML = '';
     const pdfTotal = items.filter(i => i.kind === 'pdf').length;
@@ -290,14 +322,7 @@
   function paintResults(it, resultsEl, statusEl) {
     resultsEl.innerHTML = '';
     for (const r of it.results) {
-      const row = document.createElement('div'); row.className = 'dl-row';
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(r.blob); a.download = r.name; a.className = 'dl';
-      a.textContent = '⬇ ' + r.name;
-      const sz = document.createElement('span');
-      sz.className = 'sz'; sz.textContent = sizeDelta(it, r.blob.size);
-      row.appendChild(a); row.appendChild(sz);
-      resultsEl.appendChild(row);
+      resultsEl.appendChild(dlRow(r, sizeDelta(it, r.blob.size)));
       if (r.fit) {
         const note = document.createElement('p');
         note.className = 'fitnote' + (r.fit.hit === false ? ' miss' : '');
@@ -335,7 +360,7 @@
   function renderSummaryOnly() {
     const done = items.filter(i => i.status === 'done').length;
     summary.textContent = items.length + ' file(s)' + (done ? ' · ' + done + ' converted' : '');
-    dlAllBtn.hidden = !items.some(i => i.results.length) && !mergeResultEl.children.length;
+    paintZipAlt();
   }
 
   document.getElementById('convertAll').addEventListener('click', async () => {
@@ -349,18 +374,11 @@
     mergeBtn.disabled = true; mergeBtn.textContent = 'Merging…';
     try {
       const pdfItems = items.filter(i => i.kind === 'pdf');
-      const res = await window.SabConvert.mergePdfs(pdfItems.map(i => i.file));
+      mergeResults = await window.SabConvert.mergePdfs(pdfItems.map(i => i.file));
       const totalIn = pdfItems.reduce((s, i) => s + i.file.size, 0);
       mergeResultEl.innerHTML = '';
-      for (const r of res) {
-        const row = document.createElement('div'); row.className = 'dl-row';
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(r.blob); a.download = r.name; a.className = 'dl';
-        a.textContent = '⬇ ' + r.name + ' (' + fmtSize(r.blob.size) + ')';
-        const sz = document.createElement('span');
-        sz.className = 'sz'; sz.textContent = fmtSize(totalIn) + ' → ' + fmtSize(r.blob.size);
-        row.appendChild(a); row.appendChild(sz);
-        mergeResultEl.appendChild(row);
+      for (const r of mergeResults) {
+        mergeResultEl.appendChild(dlRow(r, fmtSize(totalIn) + ' → ' + fmtSize(r.blob.size)));
       }
     } catch (e) { mergeResultEl.textContent = 'Merge failed: ' + e.message; }
     mergeBtn.disabled = false; mergeBtn.textContent = 'Merge all PDFs into one';
@@ -370,7 +388,7 @@
     const zip = new window.JSZip();
     let n = 0;
     for (const it of items) for (const r of it.results) zip.file(r.name, r.blob), n++;
-    for (const a of mergeResultEl.querySelectorAll('a.dl')) { /* merged result already zippable via its own link */ }
+    for (const r of mergeResults) zip.file(r.name, r.blob), n++;
     if (!n) return;
     const blob = await zip.generateAsync({ type: 'blob' });
     const a = document.createElement('a');
@@ -381,7 +399,7 @@
       if (it.previewUrl) URL.revokeObjectURL(it.previewUrl);
       if (it.thumbUrl) URL.revokeObjectURL(it.thumbUrl);
     }
-    items = []; mergeResultEl.innerHTML = ''; render();
+    items = []; mergeResults = []; mergeResultEl.innerHTML = ''; render();
   });
 
   /* ---------- Form / Exam Mode ---------- */
@@ -547,14 +565,7 @@
     const res = card.querySelector('.results');
     res.innerHTML = '';
     for (const r of it.results) {
-      const row = document.createElement('div'); row.className = 'dl-row';
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(r.blob); a.download = r.name; a.className = 'dl';
-      a.textContent = '⬇ ' + r.name;
-      const sz = document.createElement('span');
-      sz.className = 'sz'; sz.textContent = sizeDelta(it, r.blob.size);
-      row.appendChild(a); row.appendChild(sz);
-      res.appendChild(row);
+      res.appendChild(dlRow(r, sizeDelta(it, r.blob.size)));
       const chk = formCheck(it, r);
       const p = document.createElement('p');
       p.className = 'form-check ' + (chk.ok ? 'ok' : 'bad');

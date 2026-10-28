@@ -220,8 +220,35 @@ select:focus, input[type="text"]:focus { outline: none; border-color: var(--prim
 .opts { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 11px; color: var(--ink-var); font-size: 13px; align-items: center; }
 .opts input[type="range"] { vertical-align: middle; accent-color: var(--primary-cont); }
 .results { margin-top: 11px; display: flex; flex-direction: column; gap: 6px; }
-a.dl { color: var(--primary-cont); text-decoration: none; font-size: 14px; font-weight: 500; }
-a.dl:hover { text-decoration: underline; }
+/* Every converted file is its own real download BUTTON — never a bare
+   text link, and never hidden inside a ZIP. */
+a.dl {
+  display: inline-flex; align-items: center; gap: 9px;
+  min-height: 44px; padding: 9px 16px; max-width: 100%;
+  background: var(--primary-cont); color: #fff; border-radius: 10px;
+  box-shadow: var(--shadow-1);
+  text-decoration: none; font-size: 14.5px; font-weight: 600; line-height: 20px;
+  transition: background .12s, transform .06s;
+}
+a.dl:hover { background: var(--primary-hover); text-decoration: none; }
+a.dl:active { transform: scale(.98); }
+a.dl .dl-ico { flex: none; font-size: 15px; }
+a.dl .dl-name { word-break: break-all; }
+a.dl .dl-act {
+  margin-left: auto; flex: none; padding-left: 6px;
+  font-family: var(--mono); font-size: 10.5px; font-weight: 600;
+  letter-spacing: .08em; text-transform: uppercase; opacity: .85;
+}
+/* The one-ZIP convenience, demoted: a quiet text line under the results,
+   shown only when there are 2+ files. Never the primary action. */
+.zip-alt { margin: 14px 0 0; font-size: 13px; color: var(--muted); }
+.zip-alt button {
+  background: none; border: none; box-shadow: none; border-radius: 4px;
+  padding: 2px 3px; font: inherit; font-weight: 500; color: var(--muted);
+  text-decoration: underline; text-underline-offset: 2px; cursor: pointer;
+}
+.zip-alt button:hover { background: none; color: var(--primary-cont); }
+.zip-alt button:active { transform: none; }
 .warn { color: var(--err); font-size: 13px; margin: 10px 0 0; }
 
 /* ---------- v1.1: previews, lightbox, size labels, controls ---------- */
@@ -251,7 +278,7 @@ a.dl:hover { text-decoration: underline; }
   width: 38px; height: 38px; border-radius: 9999px; font-size: 15px; padding: 0;
 }
 #lightbox .lb-close:hover { background: rgba(255, 255, 255, .22); }
-.dl-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.dl-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
 .sz { font-family: var(--mono); font-size: 12px; color: var(--muted); }
 .fitnote { margin: 0; font-size: 12.5px; color: var(--emerald-text); }
 .fitnote.miss { color: #b45309; }
@@ -341,6 +368,10 @@ footer a:hover { color: var(--primary-cont); text-decoration: underline; }
   .toolbar-actions { margin-left: 0; }
   .toolbar-actions button { flex: 1 1 auto; }
   .card { padding: 14px; }
+  /* Phone: download buttons go full-width and unmissable. */
+  .dl-row { flex-direction: column; align-items: stretch; }
+  .dl-row .sz { text-align: center; }
+  a.dl { width: 100%; min-height: 48px; }
   .preview { height: 118px; }
   .row .convert { flex: 1; }
   .to-label { flex: 1 1 100%; }
