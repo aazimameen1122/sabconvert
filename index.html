@@ -18,6 +18,7 @@
   <span class="privacy-pill"><span class="dot" aria-hidden="true"></span>100% private — files never leave your device</span>
   <span class="nav-links">
     <a href="#converter">Converter</a>
+    <a href="#formmode">Form Mode</a>
     <a href="#formats">Supported Formats</a>
     <a href="#privacy">Privacy</a>
   </span>
@@ -72,6 +73,35 @@
     <section id="mergeResult"></section>
   </section>
 
+  <section class="wide" id="formmode">
+    <div class="sec-head">
+      <h2>Form / Exam Mode</h2>
+      <p>Portals reject a photo that is 1 KB too big — and one that is too small. Pick the form, drop the file: it is cropped to the exact box (never stretched) and fitted <strong>inside</strong> the portal's size window, with a check line that proves it. Certificate presets turn every scan into its own PDF under the cap.</p>
+    </div>
+    <div class="form-panel">
+      <div class="form-controls">
+        <label class="form-preset-label">I am filling
+          <select id="formPreset"></select>
+        </label>
+        <span class="form-custom" id="formCustom" hidden>
+          <label>For <select id="fcType"><option value="image">Photo / signature</option><option value="doc">Certificate PDF</option></select></label>
+          <label>Min <input type="number" id="fcMin" min="0" value="10"> KB</label>
+          <label>Max <input type="number" id="fcMax" min="1" value="50"> KB</label>
+          <label>Width <input type="number" id="fcW" min="0" value="0"> px</label>
+          <label>Height <input type="number" id="fcH" min="0" value="0"> px</label>
+          <span class="kb-hint">0 width/height = keep the photo's own shape</span>
+        </span>
+      </div>
+      <p class="form-hint" id="formHint"></p>
+      <div id="formDrop" tabindex="0" role="button" aria-label="Add files for form mode">
+        <p class="dz-big">Drag &amp; drop files here, or click to pick files</p>
+        <p class="dz-small">Photos &amp; signatures for image presets · scans or PDFs for certificate presets</p>
+        <input type="file" id="formFileInput" multiple hidden>
+      </div>
+      <section id="formCards"></section>
+    </div>
+  </section>
+
   <section class="wide" id="formats">
     <div class="sec-head">
       <h2>Supported Local Formats</h2>
@@ -81,8 +111,8 @@
       <article class="fmt-card">
         <div class="fmt-icon img">▦</div>
         <h3>Images</h3>
-        <p>Convert between formats with a live preview — resize to exact pixels or a target KB, tune quality, rotate and grayscale.</p>
-        <div class="tags"><span>JPG</span><span>PNG</span><span>WEBP</span><span>GIF</span><span>BMP</span><span>AVIF</span><span>→ PDF</span></div>
+        <p>Convert between formats with a live preview — resize to exact pixels or a target KB, tune quality, rotate and grayscale. iPhone HEIC photos decode right here too, rotation fixed.</p>
+        <div class="tags"><span>JPG</span><span>PNG</span><span>WEBP</span><span>GIF</span><span>BMP</span><span>AVIF</span><span>HEIC → JPG</span><span>→ PDF</span></div>
       </article>
       <article class="fmt-card">
         <div class="fmt-icon doc">≣</div>

@@ -26,6 +26,7 @@
   ];
   const KINDS = {
     image:   { label: 'Image',    exts: ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'avif'], outputs: imgOut },
+    heic:    { label: 'HEIC photo', exts: ['heic', 'heif'], outputs: imgOut },
     pdf:     { label: 'PDF',      exts: ['pdf'], outputs: [
       { to: 'png', label: 'PNG (per page)', conv: 'pdfToImages' },
       { to: 'jpg', label: 'JPG (per page)', conv: 'pdfToImages' },
@@ -85,6 +86,24 @@
     { id: 'mergePdfs', label: 'Merge all PDFs into one', kind: 'pdf', min: 2 },
   ];
 
+  /*
+   * Form / Exam Mode presets. Image presets carry a TWO-SIDED KB window
+   * (minKB and maxKB — portals reject files that are too small as well as
+   * too big) and, where the portal fixes them, exact pixel dimensions.
+   * Doc presets are per-document PDF caps (maxKB only). KB = 1024 bytes.
+   * width/height 0 = the portal does not fix dimensions; keep the aspect.
+   */
+  const FORM_PRESETS = [
+    { id: 'ssc-photo',  label: 'SSC Photo',            type: 'image', minKB: 20, maxKB: 50,  width: 200, height: 230 },
+    { id: 'ssc-sign',   label: 'SSC Signature',        type: 'image', minKB: 10, maxKB: 20,  width: 140, height: 60 },
+    { id: 'ibps-photo', label: 'IBPS Photo',           type: 'image', minKB: 20, maxKB: 50,  width: 200, height: 230 },
+    { id: 'ibps-sign',  label: 'IBPS Signature',       type: 'image', minKB: 10, maxKB: 20,  width: 140, height: 60 },
+    { id: 'neet-photo', label: 'NEET Photo',           type: 'image', minKB: 10, maxKB: 200, width: 0, height: 0 },
+    { id: 'neet-sign',  label: 'NEET Signature',       type: 'image', minKB: 4,  maxKB: 30,  width: 0, height: 0 },
+    { id: 'jkssb-cert', label: 'JKSSB Certificate PDF (each ≤ 100 KB)', type: 'doc', minKB: 0, maxKB: 100, width: 0, height: 0 },
+    { id: 'nsp-doc',    label: 'NSP Document PDF (each ≤ 200 KB)',      type: 'doc', minKB: 0, maxKB: 200, width: 0, height: 0 },
+  ];
+
   function extOf(name) {
     const i = String(name || '').lastIndexOf('.');
     return i >= 0 ? String(name).slice(i + 1).toLowerCase() : '';
@@ -107,5 +126,5 @@
     return n; // kind routes only; universal + global ops counted separately
   }
 
-  window.SC_REGISTRY = { KINDS, UNIVERSAL, GLOBAL_OPS, classify, outputsFor, extOf, routeCount };
+  window.SC_REGISTRY = { KINDS, UNIVERSAL, GLOBAL_OPS, FORM_PRESETS, classify, outputsFor, extOf, routeCount };
 })();

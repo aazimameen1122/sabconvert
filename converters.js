@@ -24,6 +24,140 @@
   }
   async function ensureGif() { await loadScript('gif.js'); return window.GIF; }
 
+  /* ---------------- HEIC decoding (lazy) ----------------
+   * The libheif-based decoder (heic2any, ~1.3 MB) is loaded ONLY when a
+   * .heic/.heif file actually arrives; everyone else pays zero bytes.
+   * Verified behaviour of this decoder build: it applies the container's
+   * irot rotation while decoding, but NOT the EXIF orientation tag — so
+   * after decoding we apply EXIF ourselves whenever the file carries no
+   * irot rotation of its own (otherwise the photo would rotate twice). */
+  async function ensureHeic() {
+    await loadScript('heic2any.min.js');
+    if (!window.heic2any) throw new Error('HEIC decoder failed to load');
+    return window.heic2any;
+  }
+  const heicCache = new WeakMap(); // File -> Promise<Blob> (decoded PNG)
+  function decodeHeicBlob(file) {
+    if (!heicCache.has(file)) {
+      heicCache.set(file, (async () => {
+        try {
+          const heic2any = await ensureHeic();
+          let outp = await heic2any({ blob: file, toType: 'image/png' });
+          if (Array.isArray(outp)) outp = outp[0];
+          if (!outp || !outp.size) throw new Error('empty decode');
+          return outp;
+        } catch (e) {
+          throw new Error('This HEIC file couldn’t be decoded — it may use a newer HEIC variant this browser build can’t read yet.');
+        }
+      })());
+    }
+    return heicCache.get(file);
+  }
+  // Walk the ISOBMFF boxes to the irot property; returns its angle in
+  // 90° CCW steps (0-3), or null when the file has no irot box.
+  function parseHeifIrot(u8) {
+    const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    function walk(start, end, depth) {
+      let i = start;
+      while (i + 8 <= end) {
+        let size = dv.getUint32(i); const type = String.fromCharCode(u8[i + 4], u8[i + 5], u8[i + 6], u8[i + 7]);
+        let hdr = 8;
+        if (size === 1) { size = Number(dv.getBigUint64(i + 8)); hdr = 16; }
+        if (size === 0) size = end - i;
+        if (size < hdr || i + size > end + 8) return null;
+        if (type === 'irot') return u8[i + hdr] & 3;
+        if (depth < 4 && (type === 'meta' || type === 'iprp' || type === 'ipco')) {
+          const r = walk(i + hdr + (type === 'meta' ? 4 : 0), i + size, depth + 1);
+          if (r !== null) return r;
+        }
+        i += size;
+      }
+      return null;
+    }
+    try { return walk(0, u8.length, 0); } catch (e) { return null; }
+  }
+  // Find the EXIF orientation (tag 274) by locating the TIFF header inside
+  // the file and parsing IFD0. The candidate is validated (SHORT, count 1,
+  // value 1-8) so random compressed bytes can't produce a false positive.
+  function parseExifOrientation(u8) {
+    for (let i = 0; i + 8 < u8.length; i++) {
+      const le = u8[i] === 0x49 && u8[i + 1] === 0x49 && u8[i + 2] === 0x2A && u8[i + 3] === 0x00;
+      const be = u8[i] === 0x4D && u8[i + 1] === 0x4D && u8[i + 2] === 0x00 && u8[i + 3] === 0x2A;
+      if (!le && !be) continue;
+      try {
+        const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+        const rd16 = (o) => le ? dv.getUint16(o, true) : dv.getUint16(o, false);
+        const rd32 = (o) => le ? dv.getUint32(o, true) : dv.getUint32(o, false);
+        const ifd = i + rd32(i + 4);
+        if (ifd + 2 > u8.length) continue;
+        const n = rd16(ifd);
+        if (n > 64) continue;
+        for (let k = 0; k < n; k++) {
+          const e = ifd + 2 + k * 12;
+          if (e + 12 > u8.length) break;
+          if (rd16(e) === 274 && rd16(e + 2) === 3 && rd32(e + 4) === 1) {
+            const v = rd16(e + 8);
+            if (v >= 1 && v <= 8) return v;
+          }
+        }
+      } catch (err) { /* keep scanning */ }
+    }
+    return null;
+  }
+  // Draw src onto a canvas with the EXIF orientation transform baked in.
+  function applyOrientation(src, o) {
+    const w = src.width, h = src.height;
+    const swap = o >= 5 && o <= 8;
+    const cv = document.createElement('canvas'); cv.width = swap ? h : w; cv.height = swap ? w : h;
+    const ctx = cv.getContext('2d');
+    switch (o) {
+      case 2: ctx.transform(-1, 0, 0, 1, w, 0); break;
+      case 3: ctx.transform(-1, 0, 0, -1, w, h); break;
+      case 4: ctx.transform(1, 0, 0, -1, 0, h); break;
+      case 5: ctx.transform(0, 1, 1, 0, 0, 0); break;
+      case 6: ctx.transform(0, 1, -1, 0, h, 0); break;
+      case 7: ctx.transform(0, -1, -1, 0, h, w); break;
+      case 8: ctx.transform(0, -1, 1, 0, 0, w); break;
+      default: ctx.drawImage(src, 0, 0); return cv;
+    }
+    ctx.drawImage(src, 0, 0);
+    return cv;
+  }
+  // The one decode entry point for every image route: HEIC files go through
+  // the lazy decoder (+ EXIF fix-up); everything else uses createImageBitmap
+  // with EXIF orientation honoured ('from-image').
+  async function decodeImageBitmap(file) {
+    if (R.classify(file) === 'heic') {
+      const png = await decodeHeicBlob(file);
+      const bmp = await createImageBitmap(png);
+      const u8 = new Uint8Array(await file.arrayBuffer());
+      if (!parseHeifIrot(u8)) {
+        const ori = parseExifOrientation(u8);
+        if (ori && ori !== 1) { const cv = applyOrientation(bmp, ori); bmp.close && bmp.close(); return cv; }
+      }
+      return bmp;
+    }
+    try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+    catch (e) { return await createImageBitmap(file); }
+  }
+  // What a card preview should display: the file itself, except HEIC, whose
+  // decoded PNG is the only thing a browser <img> can show everywhere.
+  async function previewSource(file) {
+    return R.classify(file) === 'heic' ? decodeHeicBlob(file) : file;
+  }
+
+  /* ---------------- legibility guard ----------------
+   * Documented floor: an image fit is flagged 'low' when it had to encode
+   * JPEG below quality 0.55 or downscale below 50% of the source pixels.
+   * PDF compress has its own rule at its call site (render scale < 1.4 —
+   * about 100 DPI against the ~150 DPI legibility floor — or quality
+   * < 0.5). The flag only ever produces a warning — never a block. */
+  function legibilityOf(quality, scale) {
+    if (quality != null && quality < 0.55) return 'low';
+    if (scale != null && scale < 0.5) return 'low';
+    return 'ok';
+  }
+
   const baseName = (name) => String(name || 'file').replace(/\.[^.]*$/, '');
   const out = (file, suffix, blob) => ({ name: baseName(file.name) + suffix, blob });
   const MIME = { jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp', bmp: 'image/bmp', gif: 'image/gif',
@@ -54,13 +188,13 @@
     return cv;
   }
   async function imageCanvas(file, o) {
-    const bmp = await createImageBitmap(file);
+    const bmp = await decodeImageBitmap(file);
     const cv = drawImageCanvas(bmp, o, 1);
     bmp.close && bmp.close();
     return cv;
   }
   async function imageInfo(file) {
-    const bmp = await createImageBitmap(file);
+    const bmp = await decodeImageBitmap(file);
     const d = { width: bmp.width, height: bmp.height };
     bmp.close && bmp.close();
     return d;
@@ -101,13 +235,13 @@
   // lossless, so only the scale can shrink it (reported honestly as such).
   // Returns { blob, info } where info.hit says whether the target was met.
   async function fitImage(file, target, o, targetBytes) {
-    const bmp = await createImageBitmap(file);
+    const bmp = await decodeImageBitmap(file);
     try {
       const mime = MIME[target];
       if (target !== 'png') { // fast path: the normal encode may already fit
         const q0 = o.quality ? Math.min(1, Math.max(0.1, parseFloat(o.quality))) : 0.92;
         const b0 = await canvasBlob(drawImageCanvas(bmp, o, 1), mime, q0);
-        if (b0.size <= targetBytes) return { blob: b0, info: { targetBytes, achievedBytes: b0.size, hit: true, quality: q0, scale: 1, mode: 'quality' } };
+        if (b0.size <= targetBytes) return { blob: b0, info: { targetBytes, achievedBytes: b0.size, hit: true, quality: q0, scale: 1, mode: 'quality', legibility: legibilityOf(q0, 1) } };
       }
       const scales = [1, 0.85, 0.7, 0.55, 0.45, 0.35, 0.27, 0.2, 0.15];
       let best = null;
@@ -129,7 +263,22 @@
           if (found) { best = found; break; }
         }
       }
-      return { blob: best.blob, info: { targetBytes, achievedBytes: best.blob.size, hit: !!best.hit, quality: best.quality, scale: best.scale, mode: target === 'png' ? 'scale' : 'quality+scale' } };
+      return { blob: best.blob, info: { targetBytes, achievedBytes: best.blob.size, hit: !!best.hit, quality: best.quality, scale: best.scale, mode: target === 'png' ? 'scale' : 'quality+scale', legibility: legibilityOf(best.quality, best.scale) } };
+    } finally { bmp.close && bmp.close(); }
+  }
+  // Single-frame GIF fitted under a byte target by stepping the scale down
+  // (GIF has no quality knob — 256 colours, dimensions are all we have).
+  async function fitGifImage(file, o, targetBytes) {
+    const bmp = await decodeImageBitmap(file);
+    try {
+      const scales = [1, 0.75, 0.55, 0.4, 0.3, 0.2];
+      let best = null;
+      for (const s of scales) {
+        const blob = await canvasGif(drawImageCanvas(bmp, o, s));
+        if (!best || blob.size < best.blob.size) best = { blob, scale: s, hit: false };
+        if (blob.size <= targetBytes) { best = { blob, scale: s, hit: true }; break; }
+      }
+      return { blob: best.blob, info: { targetBytes, achievedBytes: best.blob.size, hit: best.hit, quality: null, scale: best.scale, mode: 'gif', legibility: legibilityOf(null, best.scale) } };
     } finally { bmp.close && bmp.close(); }
   }
   async function convImage(file, target, o) {
@@ -137,6 +286,11 @@
     if (targetKB > 0 && (target === 'jpg' || target === 'webp' || target === 'png')) {
       const fit = await fitImage(file, target, o, Math.round(targetKB * 1024));
       const r = out(file, '.' + target, fit.blob); r.fit = fit.info;
+      return [r];
+    }
+    if (targetKB > 0 && target === 'gif') {
+      const fit = await fitGifImage(file, o, Math.round(targetKB * 1024));
+      const r = out(file, '.gif', fit.blob); r.fit = fit.info;
       return [r];
     }
     const cv = await imageCanvas(file, o);
@@ -158,6 +312,142 @@
     page.drawImage(img, { x: 0, y: 0, width: img.width, height: img.height });
     const bytes = await doc.save();
     return [out(file, '.pdf', new Blob([bytes], { type: 'application/pdf' }))];
+  }
+
+  /* ---------------- Form / Exam Mode ----------------
+   * Image presets: output must land INSIDE a two-sided KB window at exact
+   * pixels. The image is centre-cropped to the box's aspect (drag offsets
+   * fx/fy in options can reposition it) and resized — never stretched.
+   * Strategy: binary-search quality for the LARGEST encode that is still
+   * <= max; if that lands under min (sparse images like signatures encode
+   * tiny), pad the JPEG up into the window with a COM segment — a comment
+   * chunk every decoder skips, so the picture is untouched and the file
+   * is still a perfectly valid JPEG. If even the lowest quality overflows
+   * max, shrink (only when the preset fixes no dimensions) or fail
+   * honestly with the closest size achieved. */
+  async function padJpegBlob(blob, targetBytes) {
+    if (blob.size >= targetBytes) return { blob, padded: 0 };
+    const u8 = new Uint8Array(await blob.arrayBuffer());
+    if (u8[0] !== 0xFF || u8[1] !== 0xD8) return { blob, padded: 0 };
+    let need = targetBytes - blob.size;
+    const chunks = [u8.subarray(0, 2)];
+    while (need > 0) {
+      let segTotal = Math.min(need, 65535); // marker(2) + length(2) + payload
+      if (need - segTotal > 0 && need - segTotal < 4) segTotal -= 4 - (need - segTotal);
+      if (segTotal < 4) segTotal = 4;
+      const seg = new Uint8Array(segTotal);
+      seg[0] = 0xFF; seg[1] = 0xFE; // COM
+      seg[2] = (segTotal - 2) >> 8; seg[3] = (segTotal - 2) & 0xFF;
+      seg.fill(0x20, 4);
+      chunks.push(seg);
+      need -= segTotal;
+    }
+    chunks.push(u8.subarray(2));
+    return { blob: new Blob(chunks, { type: 'image/jpeg' }), padded: targetBytes - blob.size };
+  }
+  function cropToBox(src, tw, th, fx, fy) {
+    const ta = tw / th, sa = src.width / src.height;
+    let cw, ch;
+    if (sa > ta) { ch = src.height; cw = Math.round(ch * ta); } else { cw = src.width; ch = Math.round(cw / ta); }
+    cw = Math.min(cw, src.width); ch = Math.min(ch, src.height);
+    const x = Math.round((src.width - cw) * (fx == null ? 0.5 : Math.min(1, Math.max(0, fx))));
+    const y = Math.round((src.height - ch) * (fy == null ? 0.5 : Math.min(1, Math.max(0, fy))));
+    const cv = document.createElement('canvas'); cv.width = tw; cv.height = th;
+    cv.getContext('2d').drawImage(src, x, y, cw, ch, 0, 0, tw, th);
+    return cv;
+  }
+  // Largest JPEG encode of cv that is <= maxBytes (binary search on
+  // quality). Falls back to the smallest encode when nothing fits.
+  async function largestJpegUnder(cv, maxBytes) {
+    let best = null, smallest = null;
+    let lo = 0.05, hi = 1;
+    for (let i = 0; i < 8; i++) {
+      const q = (lo + hi) / 2;
+      const blob = await canvasBlob(cv, 'image/jpeg', q);
+      if (!smallest || blob.size < smallest.blob.size) smallest = { blob, quality: q };
+      if (blob.size <= maxBytes) { if (!best || blob.size > best.blob.size) best = { blob, quality: q }; lo = q; }
+      else hi = q;
+    }
+    return best ? { blob: best.blob, quality: best.quality, hit: true } : { blob: smallest.blob, quality: smallest.quality, hit: false };
+  }
+  async function formImageFit(file, spec, o) {
+    const bmp = await decodeImageBitmap(file);
+    try {
+      const minBytes = Math.round((spec.minKB || 0) * 1024);
+      const maxBytes = Math.round(spec.maxKB * 1024);
+      const hasDims = spec.width > 0 && spec.height > 0;
+      let cv = hasDims ? cropToBox(bmp, spec.width, spec.height, o.cropX, o.cropY)
+        : drawImageCanvas(bmp, {}, 1);
+      let enc = await largestJpegUnder(cv, maxBytes);
+      let scale = 1;
+      if (!enc.hit && !hasDims) { // no fixed size: shrink until it fits
+        for (const s of [0.7, 0.5, 0.35, 0.25]) {
+          cv = drawImageCanvas(bmp, {}, s); scale = s;
+          enc = await largestJpegUnder(cv, maxBytes);
+          if (enc.hit) break;
+        }
+      }
+      let blob = enc.blob, padded = 0;
+      if (enc.hit && blob.size < minBytes) {
+        const aim = Math.min(maxBytes, minBytes + Math.max(512, Math.round((maxBytes - minBytes) * 0.25)));
+        const p = await padJpegBlob(blob, aim);
+        blob = p.blob; padded = p.padded;
+      }
+      const inside = blob.size >= minBytes && blob.size <= maxBytes;
+      return { blob, info: { mode: 'window', minBytes, maxBytes, achievedBytes: blob.size, hit: inside && enc.hit,
+        quality: enc.quality, scale, padded, width: cv.width, height: cv.height,
+        legibility: legibilityOf(enc.quality, scale) } };
+    } finally { bmp.close && bmp.close(); }
+  }
+  // One scanned image -> one PDF under a cap: the image is JPEG-embedded
+  // on a page of its own aspect, stepping quality (then scale) down the
+  // ladder until the PDF fits. Used by the certificate presets.
+  async function certPdfFromImage(file, maxBytes) {
+    const { PDFDocument } = await ensurePdfLib();
+    const bmp = await decodeImageBitmap(file);
+    try {
+      const ladder = [[1, 0.85], [1, 0.7], [0.85, 0.65], [0.7, 0.6], [0.55, 0.55], [0.45, 0.5], [0.35, 0.45], [0.28, 0.4]];
+      let best = null;
+      for (const [s, q] of ladder) {
+        const cv = drawImageCanvas(bmp, {}, s);
+        const jpg = await canvasBlob(cv, 'image/jpeg', q);
+        const doc = await PDFDocument.create();
+        const img = await doc.embedJpg(new Uint8Array(await jpg.arrayBuffer()));
+        const page = doc.addPage([img.width, img.height]);
+        page.drawImage(img, { x: 0, y: 0, width: img.width, height: img.height });
+        const blob = new Blob([await doc.save()], { type: 'application/pdf' });
+        if (!best || blob.size < best.blob.size) best = { blob, quality: q, scale: s, hit: false };
+        if (blob.size <= maxBytes) { best = { blob, quality: q, scale: s, hit: true }; break; }
+      }
+      return { blob: best.blob, info: { mode: 'cert', minBytes: 0, maxBytes, achievedBytes: best.blob.size, hit: best.hit,
+        quality: best.quality, scale: best.scale, pages: 1, legibility: legibilityOf(best.quality, best.scale) } };
+    } finally { bmp.close && bmp.close(); }
+  }
+  // Form Mode entry point. spec: a FORM_PRESETS entry or a custom object
+  // of the same shape. opts carries cropX/cropY for image presets.
+  async function formFit(file, spec, opts) {
+    const o = opts || {};
+    const kind = R.classify(file);
+    if (spec.type === 'image') {
+      if (kind !== 'image' && kind !== 'heic') throw new Error('This preset needs a photo/signature image (JPG, PNG, WEBP or HEIC).');
+      const fit = await formImageFit(file, spec, o);
+      const r = { name: baseName(file.name) + '-' + spec.id + '.jpg', blob: fit.blob, fit: fit.info };
+      return [r];
+    }
+    // doc presets: every file becomes its OWN PDF under the cap.
+    const maxBytes = Math.round(spec.maxKB * 1024);
+    if (kind === 'pdf') {
+      const res = await convPdfCompress(file, 'compress', { targetKB: String(spec.maxKB) });
+      const r = res[0];
+      r.name = baseName(file.name) + '-' + spec.id + '.pdf';
+      r.fit.mode = 'cert'; r.fit.minBytes = 0; r.fit.maxBytes = maxBytes;
+      return [r];
+    }
+    if (kind === 'image' || kind === 'heic') {
+      const fit = await certPdfFromImage(file, maxBytes);
+      return [{ name: baseName(file.name) + '-' + spec.id + '.pdf', blob: fit.blob, fit: fit.info }];
+    }
+    throw new Error('This preset needs a scanned image or a PDF.');
   }
 
   /* ---------------- PDF ---------------- */
@@ -293,7 +583,8 @@
       if (!targetBytes) break;
     }
     const r = out(file, '-compressed.pdf', best.blob);
-    r.fit = { targetBytes: targetBytes || null, achievedBytes: best.blob.size, hit: targetBytes ? !!best.hit : null, quality: best.quality, scale: best.scale, pages: pdf.numPages, mode: 'pdf' };
+    r.fit = { targetBytes: targetBytes || null, achievedBytes: best.blob.size, hit: targetBytes ? !!best.hit : null, quality: best.quality, scale: best.scale, pages: pdf.numPages, mode: 'pdf',
+      legibility: (best.scale < 1.4 || best.quality < 0.5) ? 'low' : 'ok' };
     return [r];
   }
 
@@ -611,19 +902,34 @@
   async function convVideoFrame(file) {
     return [out(file, '-frame.jpg', await videoFrameBlob(file))];
   }
-  async function convVideoToGif(file) {
+  async function renderVideoGif(v, GIF, width, fps) {
+    const dur = Math.min(v.duration || 1, 3), n = Math.max(2, Math.round(dur * fps));
+    const scale = width / (v.videoWidth || width);
+    const cv = document.createElement('canvas');
+    cv.width = width; cv.height = Math.max(2, Math.round((v.videoHeight || 240) * Math.min(1, scale)));
+    const ctx = cv.getContext('2d');
+    const gif = new GIF({ workers: 2, quality: 12, width: cv.width, height: cv.height, workerScript: 'gif.worker.js' });
+    for (let i = 0; i < n; i++) { await seek(v, (i / fps) + 0.01); ctx.drawImage(v, 0, 0, cv.width, cv.height); gif.addFrame(cv, { copy: true, delay: Math.round(1000 / fps) }); }
+    return new Promise((res, rej) => { gif.on('finished', res); gif.on('abort', () => rej(new Error('gif aborted'))); gif.render(); });
+  }
+  async function convVideoToGif(file, target, o) {
     const GIF = await ensureGif();
     const v = await loadVideo(file);
     try {
-      const dur = Math.min(v.duration || 1, 3), fps = 8, n = Math.max(2, Math.round(dur * fps));
-      const scale = 320 / (v.videoWidth || 320);
-      const cv = document.createElement('canvas');
-      cv.width = 320; cv.height = Math.max(2, Math.round((v.videoHeight || 240) * Math.min(1, scale)));
-      const ctx = cv.getContext('2d');
-      const gif = new GIF({ workers: 2, quality: 12, width: cv.width, height: cv.height, workerScript: 'gif.worker.js' });
-      for (let i = 0; i < n; i++) { await seek(v, (i / fps) + 0.01); ctx.drawImage(v, 0, 0, cv.width, cv.height); gif.addFrame(cv, { copy: true, delay: Math.round(1000 / fps) }); }
-      const blob = await new Promise((res, rej) => { gif.on('finished', res); gif.on('abort', () => rej(new Error('gif aborted'))); gif.render(); });
-      return [out(file, '.gif', blob)];
+      const targetKB = parseFloat((o && o.targetKB) || '0');
+      if (!(targetKB > 0)) return [out(file, '.gif', await renderVideoGif(v, GIF, 320, 8))];
+      // Fit under the target by shrinking width, then frame rate.
+      const targetBytes = Math.round(targetKB * 1024);
+      const ladder = [[320, 8], [256, 8], [224, 7], [192, 7], [160, 6], [128, 5], [96, 5]];
+      let best = null;
+      for (const [w, fps] of ladder) {
+        const blob = await renderVideoGif(v, GIF, w, fps);
+        if (!best || blob.size < best.blob.size) best = { blob, width: w, hit: false };
+        if (blob.size <= targetBytes) { best = { blob, width: w, hit: true }; break; }
+      }
+      const r = out(file, '.gif', best.blob);
+      r.fit = { targetBytes, achievedBytes: best.blob.size, hit: best.hit, quality: null, scale: best.width / 320, mode: 'gif', legibility: 'ok' };
+      return [r];
     } finally { URL.revokeObjectURL(v.src); }
   }
 
@@ -636,7 +942,34 @@
     zipPack: convZipPack, zipExtract: convZipExtract, b64Encode: convB64Encode, b64Decode: convB64Decode,
     videoFrame: convVideoFrame, videoToGif: convVideoToGif,
   };
+  // Turn engine failures into plain-words reasons a person can act on.
+  // PDF failures are probed with pdf.js: a PasswordException means the
+  // file is locked (the single most confusing converter failure there is),
+  // an InvalidPDFException means it is corrupt or not really a PDF.
+  const PASSWORD_MSG = 'This PDF is password-protected. Remove the password first, then try again.';
+  const CORRUPT_PDF_MSG = 'This file looks corrupt, or isn’t really a PDF — the converter couldn’t read it.';
+  async function friendlyError(file, e) {
+    const kind = R.classify(file);
+    const msg = (e && e.message) || String(e);
+    if (kind === 'pdf') {
+      if ((e && e.name === 'PasswordException') || /password/i.test(msg)) return new Error(PASSWORD_MSG);
+      if ((e && e.name === 'InvalidPDFException') || /invalid pdf/i.test(msg)) return new Error(CORRUPT_PDF_MSG);
+      try { await pdfJsDoc(file); } catch (probe) {
+        if (probe && probe.name === 'PasswordException') return new Error(PASSWORD_MSG);
+        if (probe && (probe.name === 'InvalidPDFException' || /invalid pdf/i.test(probe.message || ''))) return new Error(CORRUPT_PDF_MSG);
+      }
+      return e;
+    }
+    if ((kind === 'image' || kind === 'heic') && /could not be decoded|decod|bitmap/i.test(msg)) {
+      return new Error('This image couldn’t be read — the file may be corrupt, or not really a ' + (R.extOf(file.name) || 'image').toUpperCase() + '.');
+    }
+    return e;
+  }
   async function convert(file, target, options) {
+    try { return await convertInner(file, target, options); }
+    catch (e) { throw await friendlyError(file, e); }
+  }
+  async function convertInner(file, target, options) {
     const o = options || {};
     const kind = R.classify(file);
     const outs = R.outputsFor(kind);
@@ -656,6 +989,6 @@
     }
   }
 
-  window.SabConvert = { convert, mergePdfs, compressPdf: convPdfCompress, imageInfo, pdfThumb, videoThumb: videoFrameBlob, registry: R, converters: SC_CONVERTERS,
-    _test: { parseDelimited, emitTable, mdToHtml, mdToTxt, htmlToTxt, parseCues, emitCues, parsePageRange, encodeBMP } };
+  window.SabConvert = { convert, mergePdfs, compressPdf: convPdfCompress, formFit, imageInfo, pdfThumb, videoThumb: videoFrameBlob, previewSource, registry: R, converters: SC_CONVERTERS,
+    _test: { parseDelimited, emitTable, mdToHtml, mdToTxt, htmlToTxt, parseCues, emitCues, parsePageRange, encodeBMP, parseExifOrientation, parseHeifIrot, padJpegBlob } };
 })();
